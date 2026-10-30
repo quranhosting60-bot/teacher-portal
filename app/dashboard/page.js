@@ -6,7 +6,6 @@ import { pkSlot, pkNow, dayNames, nowIn, DAYS } from '../../lib/time';
 import { COUNTRIES } from '../../lib/zones';
 
 const COUNTRY_LIST = Object.keys(COUNTRIES);
-const money = (n) => 'Rs ' + Math.round(n || 0).toLocaleString('en-US');
 const when = (d) => new Date(d).toLocaleString('en-GB', { timeZone: 'Asia/Karachi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase() + ' PKT';
 
 export default function Dashboard() {
@@ -24,7 +23,7 @@ export default function Dashboard() {
   const [tab, setTab] = useState('schedule');
   const [filter, setFilter] = useState('');
   const [q, setQ] = useState('');
-  const [f, setF] = useState({ tn: '', tp: '', tpw: '', sn: '', roll: '', pay: '', nc: '1', country: 'United States', state: 'Alabama', ct: '', cs: '', time: '18:00', days: [] });
+  const [f, setF] = useState({ tn: '', tp: '', tpw: '', sn: '', roll: '', nc: '1', country: 'United States', state: 'Alabama', ct: '', cs: '', time: '18:00', days: [] });
   const set = (k, v) => setF((o) => ({ ...o, [k]: v }));
 
   const load = useCallback(async () => {
@@ -56,19 +55,9 @@ export default function Dashboard() {
     if (!f.roll.trim() || !f.sn.trim()) return setMsg('Please enter the roll number and the student name.');
     const nc = parseInt(f.nc, 10);
     if (isNaN(nc) || nc < 1) return setMsg('Number of classes must be at least 1.');
-    const pay = f.pay === '' ? 0 : Number(f.pay);
-    if (isNaN(pay) || pay < 0) return setMsg('Pay per class must be a valid number.');
-    const { error } = await supabase.from('students').insert({ roll_no: f.roll.trim(), name: f.sn.trim(), country: f.country, state: f.state, tz: COUNTRIES[f.country][f.state], pay_per_class: pay, num_classes: nc });
+    const { error } = await supabase.from('students').insert({ roll_no: f.roll.trim(), name: f.sn.trim(), country: f.country, state: f.state, tz: COUNTRIES[f.country][f.state], num_classes: nc });
     if (error) return setMsg(error.message.includes('duplicate') ? 'This roll number is already used by another student.' : 'Error: ' + error.message);
-    setMsg('Student added.'); setF((o) => ({ ...o, sn: '', roll: '', pay: '', nc: '1' })); load(); setTab('students');
-  }
-  async function editPay(s) {
-    const v = prompt(`Pay per class for ${s.name} (PKR):`, s.pay_per_class ?? 0);
-    if (v === null) return;
-    const n = Number(v);
-    if (v.trim() === '' || isNaN(n) || n < 0) return setMsg('Please enter a valid amount.');
-    const { error } = await supabase.from('students').update({ pay_per_class: n }).eq('id', s.id);
-    setMsg(error ? 'Error: ' + error.message : 'Pay updated.'); load();
+    setMsg('Student added.'); setF((o) => ({ ...o, sn: '', roll: '', nc: '1' })); load(); setTab('students');
   }
   async function editNum(s) {
     const v = prompt(`How many classes does ${s.name} take?`, s.num_classes ?? 1);
@@ -101,6 +90,7 @@ export default function Dashboard() {
   if (!me) return <p style={{ padding: 20 }}>Loading...</p>;
   const isMgr = me.role === 'manager', isTeacher = me.role === 'teacher', canPost = !isTeacher;
   const byId = (list, id) => list.find((x) => x.id === id);
+  const myTotal = [...new Map(rows.map((r) => [r.student_id, r.num_classes || 1])).values()].reduce((a, b) => a + b, 0);
 
   const Header = (
     <div className="bar">
@@ -130,16 +120,18 @@ export default function Dashboard() {
     <div className="profile">
       <span className="tid">{me.username}</span>
       <div><h2>{me.full_name}</h2><small>{me.phone ? 'Contact: ' + me.phone : 'Teacher'}</small></div>
-      <div className="big"><b>{rows.length}</b><span>Total classes</span></div>
+      <div className="big"><b>{myTotal}</b><span>Total classes</span></div>
     </div>
     <div className="panel"><h3>My classes <small style={{ fontWeight: 400, color: '#7a6d8a' }}>(Pakistan Time, PKT)</small></h3>
-      <table><thead><tr><th>#</th><th>Roll No</th><th>Student</th><th>Days (PKT)</th><th>Time (PKT)</th></tr></thead>
-        <tbody>{rows.length === 0 && <tr><td colSpan="5" className="empty">No classes assigned yet.</td></tr>}
-          {rows.map((r, i) => <tr key={r.class_id}><td>{i + 1}</td><td><span className="pk">{r.roll_no || '-'}</span></td><td><b>{r.student_name}</b></td><td>{dayNames(r.pk_days)}</td><td><span className="pk">{r.pk_time}</span></td></tr>)}</tbody></table>
+      <table><thead><tr><th>#</th><th>Roll No</th><th>Student</th><th>Classes</th><th>Days (PKT)</th><th>Time (PKT)</th></tr></thead>
+        <tbody>{rows.length === 0 && <tr><td colSpan="6" className="empty">No classes assigned yet.</td></tr>}
+          {rows.map((r, i) => <tr key={r.class_id}><td>{i + 1}</td><td><span className="pk">{r.roll_no || '-'}</span></td><td><b>{r.student_name}</b></td><td><b>{r.num_classes || 1}</b></td><td>{dayNames(r.pk_days)}</td><td><span className="pk">{r.pk_time}</span></td></tr>)}</tbody></table>
     </div></div></>);
 
   const now = pkNow();
   const slotsOf = (tid) => classes.filter((c) => c.teacher_id === tid).map((c) => { const s = byId(students, c.student_id); return s ? pkSlot(c.local_time, s.tz, c.weekdays) : null; }).filter(Boolean);
+  const isToday = (c) => { const st = byId(students, c.student_id); return !!st && pkSlot(c.local_time, st.tz, c.weekdays).days.includes(now.day); };
+  const unitsOf = (tid, only) => { const m = new Map(); classes.filter((c) => c.teacher_id === tid && (!only || only(c))).forEach((c) => { const st = byId(students, c.student_id); if (st) m.set(st.id, st.num_classes || 1); }); return [...m.values()].reduce((a, b) => a + b, 0); };
   const visible = classes.filter((c) => !filter || c.teacher_id === filter);
   const tabs = [['schedule', 'Schedule'], ['teachers', 'Teachers'], ['students', 'Students'], ...(isMgr ? [['add', '+ Add New']] : [])];
   const dt = openT ? byId(teachers, openT) : null;
@@ -167,38 +159,35 @@ export default function Dashboard() {
       <table><thead><tr><th>ID</th><th>Name</th><th>Contact</th><th>Total classes</th><th>Classes today</th><th>Next class today</th><th></th></tr></thead>
         <tbody>{teachers.length === 0 && <tr><td colSpan="7" className="empty">No teachers yet.</td></tr>}
           {teachers.map((t) => { const sl = slotsOf(t.id), today = sl.filter((k) => k.days.includes(now.day)), next = today.filter((k) => k.mins >= now.mins).sort((a, b) => a.mins - b.mins)[0];
-            return (<tr key={t.id} style={{ cursor: 'pointer' }} onClick={() => setOpenT(t.id)}><td><span className="tid">{t.username}</span></td><td><b>{t.full_name}</b></td><td>{t.phone}</td><td><b>{sl.length}</b></td><td><b>{today.length}</b></td><td>{next ? <span className="pk">{next.time}</span> : <span style={{ color: '#7a6d8a' }}>None remaining</span>}</td><td><button className="btn view" onClick={() => setOpenT(t.id)}>Open</button></td></tr>); })}</tbody></table></div>}
+            return (<tr key={t.id} style={{ cursor: 'pointer' }} onClick={() => setOpenT(t.id)}><td><span className="tid">{t.username}</span></td><td><b>{t.full_name}</b></td><td>{t.phone}</td><td><b>{unitsOf(t.id)}</b></td><td><b>{unitsOf(t.id, isToday)}</b></td><td>{next ? <span className="pk">{next.time}</span> : <span style={{ color: '#7a6d8a' }}>None remaining</span>}</td><td><button className="btn view" onClick={() => setOpenT(t.id)}>Open</button></td></tr>); })}</tbody></table></div>}
 
     {tab === 'teachers' && dt && (() => {
       const list = classes.filter((c) => c.teacher_id === dt.id).map((c) => { const s = byId(students, c.student_id); return s ? { c, s, k: pkSlot(c.local_time, s.tz, c.weekdays) } : null; }).filter(Boolean).sort((a, b) => a.k.mins - b.k.mins);
-      const todayN = list.filter((x) => x.k.days.includes(now.day)).length;
-      const weeklySessions = list.reduce((n, x) => n + x.c.weekdays.length, 0);
       return (<div className="panel">
         <div className="head"><button className="btn out" onClick={() => setOpenT(null)}>← Back to teachers</button></div>
         <div className="head" style={{ justifyContent: 'flex-start', gap: 14 }}><span className="tid" style={{ fontSize: 20 }}>{dt.username}</span><div><h3 style={{ margin: 0, fontSize: 22 }}>{dt.full_name}</h3><small style={{ color: '#7a6d8a' }}>{dt.phone ? 'Contact: ' + dt.phone : ''}</small></div></div>
         <div className="cards">
           <div><b>{new Set(list.map((x) => x.s.id)).size}</b><span>Students</span></div>
-          <div><b>{list.length}</b><span>Classes</span></div>
-          <div><b>{todayN}</b><span>Classes today (PKT)</span></div>
-          <div><b>{weeklySessions}</b><span>Sessions per week</span></div>
+          <div><b>{unitsOf(dt.id)}</b><span>Total classes</span></div>
+          <div><b>{unitsOf(dt.id, isToday)}</b><span>Classes today (PKT)</span></div>
         </div>
-        <table><thead><tr><th>Roll No</th><th>Student</th><th>Country / State</th><th>Student&apos;s schedule</th><th>Pakistan day &amp; time</th><th>Pay / class</th></tr></thead>
+        <table><thead><tr><th>Roll No</th><th>Student</th><th>Classes</th><th>Country / State</th><th>Student&apos;s schedule</th><th>Pakistan day &amp; time</th></tr></thead>
           <tbody>{list.length === 0 && <tr><td colSpan="6" className="empty">No classes assigned to this teacher yet.</td></tr>}
-            {list.map(({ c, s, k }) => <tr key={c.id}><td><span className="pk">{s.roll_no || '-'}</span></td><td><b>{s.name}</b></td><td>{s.country} / {s.state}</td><td>{dayNames(c.weekdays)} {c.local_time.slice(0, 5)}</td><td><span className="pk">{dayNames(k.days)} {k.time}</span></td><td><span className="money">{money(s.pay_per_class)}</span></td></tr>)}</tbody></table>
-        <div className="hint">Pay is visible only to the CEO and managers.</div>
+            {list.map(({ c, s, k }) => <tr key={c.id}><td><span className="pk">{s.roll_no || '-'}</span></td><td><b>{s.name}</b></td><td><b>{s.num_classes || 1}</b></td><td>{s.country} / {s.state}</td><td>{dayNames(c.weekdays)} {c.local_time.slice(0, 5)}</td><td><span className="pk">{dayNames(k.days)} {k.time}</span></td></tr>)}</tbody></table>
+        
       </div>);
     })()}
 
     {tab === 'students' && <div className="panel">
       <div className="head"><h3>Students</h3><input style={{ width: 260 }} placeholder="Search by roll no or name" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-      <table><thead><tr><th>Roll No</th><th>Name</th><th>Classes</th><th>Teacher &amp; Pakistan time</th><th>Country</th><th>State</th><th>Time there now</th><th>Pay / class</th>{isMgr && <th></th>}</tr></thead>
-        <tbody>{students.length === 0 && <tr><td colSpan="9" className="empty">No students yet.</td></tr>}
+      <table><thead><tr><th>Roll No</th><th>Name</th><th>Classes</th><th>Teacher &amp; Pakistan time</th><th>Country</th><th>State</th><th>Time there now</th>{isMgr && <th></th>}</tr></thead>
+        <tbody>{students.length === 0 && <tr><td colSpan="8" className="empty">No students yet.</td></tr>}
           {students.filter((s) => !q || (s.name + ' ' + (s.roll_no || '')).toLowerCase().includes(q.toLowerCase())).map((s) => {
             const mine = classes.filter((c) => c.student_id === s.id);
             return (<tr key={s.id}><td><span className="pk">{s.roll_no || '-'}</span></td><td><b>{s.name}</b></td><td><b>{s.num_classes || 1}</b><span className="sub">{mine.length} scheduled</span></td>
               <td>{mine.length ? mine.map((c) => { const t = byId(teachers, c.teacher_id), k = pkSlot(c.local_time, s.tz, c.weekdays); return <div className="line" key={c.id}><span className="tid">{t?.username}</span> {t?.full_name} — <span className="pk">{dayNames(k.days)} {k.time}</span></div>; }) : <span style={{ color: '#7a6d8a' }}>Not assigned</span>}</td>
-              <td>{s.country}</td><td>{s.state}</td><td>{nowIn(s.tz)}</td><td><span className="money">{money(s.pay_per_class)}</span></td>
-              {isMgr && <td style={{ whiteSpace: 'nowrap' }}><button className="btn edit" onClick={() => editNum(s)}>Edit classes</button><button className="btn edit" onClick={() => editPay(s)}>Edit pay</button><button className="btn sm" onClick={() => del('students', s.id, s.name)}>Delete</button></td>}</tr>); })}</tbody></table></div>}
+              <td>{s.country}</td><td>{s.state}</td><td>{nowIn(s.tz)}</td>
+              {isMgr && <td style={{ whiteSpace: 'nowrap' }}><button className="btn edit" onClick={() => editNum(s)}>Edit classes</button><button className="btn sm" onClick={() => del('students', s.id, s.name)}>Delete</button></td>}</tr>); })}</tbody></table></div>}
 
     {tab === 'add' && isMgr && <div className="grid">
       <div className="panel form"><h3>1. Add teacher</h3>
@@ -211,16 +200,15 @@ export default function Dashboard() {
         <label>Student name</label><input value={f.sn} onChange={(e) => set('sn', e.target.value)} />
         <label>Country</label><select value={f.country} onChange={(e) => setF((o) => ({ ...o, country: e.target.value, state: Object.keys(COUNTRIES[e.target.value])[0] }))}>{COUNTRY_LIST.map((c) => <option key={c}>{c}</option>)}</select>
         <label>State / Region</label><select value={f.state} onChange={(e) => set('state', e.target.value)}>{Object.keys(COUNTRIES[f.country]).map((s) => <option key={s}>{s}</option>)}</select>
-        <label>How many classes? (per student)</label><input type="number" min="1" value={f.nc} onChange={(e) => set('nc', e.target.value)} />
-        <label>Teacher pay per class (PKR)</label><input type="number" min="0" value={f.pay} onChange={(e) => set('pay', e.target.value)} placeholder="e.g. 500" />
-        <button className="btn" onClick={addStudent}>Add student</button><div className="hint">Total classes goes up by this number. Time zone is set from the state. Teachers cannot see the pay.</div></div>
+        <label>How many classes does the student take?</label><select value={f.nc} onChange={(e) => set('nc', e.target.value)}>{[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n} {n === 1 ? 'class' : 'classes'}</option>)}</select>
+        <button className="btn" onClick={addStudent}>Add student</button><div className="hint">30 min = 1 class, 1 hour = 2 classes. The teacher's class count goes up by this number. Time zone is set from the state.</div></div>
       <div className="panel form"><h3>3. Add class</h3>
         <label>Teacher</label><select value={f.ct} onChange={(e) => set('ct', e.target.value)}><option value="">Select teacher</option>{teachers.map((t) => <option key={t.id} value={t.id}>{t.username} - {t.full_name}</option>)}</select>
         <label>Student</label><select value={f.cs} onChange={(e) => set('cs', e.target.value)}><option value="">Select student</option>{students.map((s) => <option key={s.id} value={s.id}>{s.roll_no ? s.roll_no + ' - ' : ''}{s.name} ({s.state}, {s.country})</option>)}</select>
-        {f.cs && <div className="hint">This student already has {classes.filter((c) => c.student_id === f.cs).length} class(es). You can add as many as needed.</div>}
+        {f.cs && <div className="hint">This student takes {byId(students, f.cs)?.num_classes || 1} class(es) in total (set in student details).</div>}
         <label>Class time (student&apos;s local time)</label><input type="time" value={f.time} onChange={(e) => set('time', e.target.value)} />
         <label>Days (student&apos;s local days)</label><div className="days">{DAYS.map((d, i) => <span key={d} className={'day' + (f.days.includes(i + 1) ? ' on' : '')} onClick={() => toggleDay(i + 1)}>{d}</span>)}</div>
-        <button className="btn" onClick={addClass}>Add class</button><div className="hint">Pakistan day and time are calculated automatically. For a second class of the same student, add another class with a different time/teacher.</div></div>
+        <button className="btn" onClick={addClass}>Add class</button><div className="hint">Pakistan day and time are calculated automatically.</div></div>
     </div>}
   </div></>);
 }
