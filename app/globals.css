@@ -60,3 +60,7 @@ input:focus,select:focus{outline:2px solid #d9c3f0;border-color:var(--p)}
 .line{margin:2px 0;white-space:nowrap}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:12px 0}
 .cards div{background:var(--soft);border-radius:12px;padding:12px 14px}.cards b{display:block;font-size:22px;color:var(--p2)}.cards span{font-size:12px;color:var(--mut)}
+.modal-bg{position:fixed;inset:0;background:#241a3399;display:flex;align-items:center;justify-content:center;padding:16px;z-index:50}
+.modal{background:#fff;border-radius:18px;padding:22px;width:100%;max-width:440px;max-height:90vh;overflow:auto;box-shadow:0 20px 60px #0004}
+.modal h3{margin:0 0 6px;color:var(--p2);text-transform:capitalize}
+.mrow{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}.mrow .btn{width:auto;margin:0;padding:10px 22px}

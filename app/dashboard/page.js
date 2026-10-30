@@ -19,6 +19,8 @@ export default function Dashboard() {
   const [annText, setAnnText] = useState('');
   const [showAll, setShowAll] = useState(false);
   const [openT, setOpenT] = useState(null);
+  const [ed, setEd] = useState(null);
+  const [edErr, setEdErr] = useState('');
   const [msg, setMsg] = useState('');
   const [tab, setTab] = useState('schedule');
   const [filter, setFilter] = useState('');
@@ -57,15 +59,31 @@ export default function Dashboard() {
     if (isNaN(nc) || nc < 1) return setMsg('Number of classes must be at least 1.');
     const { error } = await supabase.from('students').insert({ roll_no: f.roll.trim(), name: f.sn.trim(), country: f.country, state: f.state, tz: COUNTRIES[f.country][f.state], num_classes: nc });
     if (error) return setMsg(error.message.includes('duplicate') ? 'This roll number is already used by another student.' : 'Error: ' + error.message);
-    setMsg('Student added.'); setF((o) => ({ ...o, sn: '', roll: '', nc: '1' })); load(); setTab('students');
+    setMsg(`Student added with ${nc} ${nc === 1 ? 'class' : 'classes'}.`); setF((o) => ({ ...o, sn: '', roll: '', nc: '1' })); load(); setTab('students');
   }
-  async function editNum(s) {
-    const v = prompt(`How many classes does ${s.name} take?`, s.num_classes ?? 1);
-    if (v === null) return;
-    const n = parseInt(v, 10);
-    if (isNaN(n) || n < 1) return setMsg('Please enter a number (1 or more).');
-    const { error } = await supabase.from('students').update({ num_classes: n }).eq('id', s.id);
-    setMsg(error ? 'Error: ' + error.message : 'Classes updated.'); load();
+  const openStudent = (s) => { setEdErr(''); setEd({ kind: 'student', id: s.id, roll: s.roll_no || '', name: s.name, country: COUNTRIES[s.country] ? s.country : COUNTRY_LIST[0], state: s.state, nc: String(s.num_classes || 1) }); };
+  const openTeacher = (t) => { setEdErr(''); setEd({ kind: 'teacher', id: t.id, name: t.full_name || '', phone: t.phone || '' }); };
+  const openClass = (c) => { setEdErr(''); setEd({ kind: 'class', id: c.id, teacher: c.teacher_id, student: c.student_id, time: String(c.local_time).slice(0, 5), days: [...c.weekdays] }); };
+  const setE = (k, v) => setEd((o) => ({ ...o, [k]: v }));
+  async function saveEdit() {
+    const e = ed; let error;
+    if (e.kind === 'student') {
+      const nc = parseInt(e.nc, 10);
+      if (!e.roll.trim() || !e.name.trim()) return setEdErr('Roll number and name are required.');
+      if (isNaN(nc) || nc < 1) return setEdErr('Number of classes must be at least 1.');
+      const tz = (COUNTRIES[e.country] || {})[e.state];
+      if (!tz) return setEdErr('Please choose a valid country and state.');
+      ({ error } = await supabase.from('students').update({ roll_no: e.roll.trim(), name: e.name.trim(), country: e.country, state: e.state, tz, num_classes: nc }).eq('id', e.id));
+      if (error && error.message.includes('duplicate')) return setEdErr('This roll number is already used by another student.');
+    } else if (e.kind === 'teacher') {
+      if (!e.name.trim()) return setEdErr('Name is required.');
+      ({ error } = await supabase.from('profiles').update({ full_name: e.name.trim(), phone: e.phone.trim() }).eq('id', e.id));
+    } else {
+      if (!e.teacher || !e.student || !e.days.length) return setEdErr('Select a teacher, a student and at least one day.');
+      ({ error } = await supabase.from('classes').update({ teacher_id: e.teacher, student_id: e.student, weekdays: [...e.days].sort((a, b) => a - b), local_time: e.time }).eq('id', e.id));
+    }
+    if (error) return setEdErr('Error: ' + error.message);
+    setEd(null); setMsg('Changes saved.'); load();
   }
   async function addClass() {
     if (!f.ct || !f.cs || !f.days.length) return setMsg('Please select a teacher, a student and at least one day.');
@@ -153,27 +171,27 @@ export default function Dashboard() {
         <tbody>{visible.length === 0 && <tr><td colSpan="8" className="empty">No classes found.</td></tr>}
           {visible.map((c) => { const s = byId(students, c.student_id), t = byId(teachers, c.teacher_id); if (!s) return null; const k = pkSlot(c.local_time, s.tz, c.weekdays);
             return (<tr key={c.id}><td><span className="tid">{t?.username}</span> <b>{t?.full_name}</b></td><td><b>{s.roll_no || '-'}</b></td><td><b>{s.name}</b></td><td>{s.country} / {s.state}</td><td>{dayNames(c.weekdays)} {c.local_time.slice(0, 5)}</td>
-              <td><span className="pk">{dayNames(k.days)} {k.time}</span></td><td>{nowIn(s.tz)}</td>{isMgr && <td><button className="btn sm" onClick={() => del('classes', c.id, 'this class')}>Delete</button></td>}</tr>); })}</tbody></table></div>}
+              <td><span className="pk">{dayNames(k.days)} {k.time}</span></td><td>{nowIn(s.tz)}</td>{isMgr && <td style={{ whiteSpace: 'nowrap' }}><button className="btn edit" onClick={() => openClass(c)}>Edit</button><button className="btn sm" onClick={() => del('classes', c.id, 'this class')}>Delete</button></td>}</tr>); })}</tbody></table></div>}
 
     {tab === 'teachers' && !dt && <div className="panel"><h3>Teachers <small style={{ fontWeight: 400, color: '#7a6d8a' }}>(click a teacher to see all students &amp; timings)</small></h3>
       <table><thead><tr><th>ID</th><th>Name</th><th>Contact</th><th>Total classes</th><th>Classes today</th><th>Next class today</th><th></th></tr></thead>
         <tbody>{teachers.length === 0 && <tr><td colSpan="7" className="empty">No teachers yet.</td></tr>}
           {teachers.map((t) => { const sl = slotsOf(t.id), today = sl.filter((k) => k.days.includes(now.day)), next = today.filter((k) => k.mins >= now.mins).sort((a, b) => a.mins - b.mins)[0];
-            return (<tr key={t.id} style={{ cursor: 'pointer' }} onClick={() => setOpenT(t.id)}><td><span className="tid">{t.username}</span></td><td><b>{t.full_name}</b></td><td>{t.phone}</td><td><b>{unitsOf(t.id)}</b></td><td><b>{unitsOf(t.id, isToday)}</b></td><td>{next ? <span className="pk">{next.time}</span> : <span style={{ color: '#7a6d8a' }}>None remaining</span>}</td><td><button className="btn view" onClick={() => setOpenT(t.id)}>Open</button></td></tr>); })}</tbody></table></div>}
+            return (<tr key={t.id} style={{ cursor: 'pointer' }} onClick={() => setOpenT(t.id)}><td><span className="tid">{t.username}</span></td><td><b>{t.full_name}</b></td><td>{t.phone}</td><td><b>{unitsOf(t.id)}</b></td><td><b>{unitsOf(t.id, isToday)}</b></td><td>{next ? <span className="pk">{next.time}</span> : <span style={{ color: '#7a6d8a' }}>None remaining</span>}</td><td style={{ whiteSpace: 'nowrap' }}><button className="btn view" onClick={() => setOpenT(t.id)}>Open</button>{isMgr && <button className="btn edit" style={{ marginLeft: 6 }} onClick={(ev) => { ev.stopPropagation(); openTeacher(t); }}>Edit</button>}</td></tr>); })}</tbody></table></div>}
 
     {tab === 'teachers' && dt && (() => {
       const list = classes.filter((c) => c.teacher_id === dt.id).map((c) => { const s = byId(students, c.student_id); return s ? { c, s, k: pkSlot(c.local_time, s.tz, c.weekdays) } : null; }).filter(Boolean).sort((a, b) => a.k.mins - b.k.mins);
       return (<div className="panel">
-        <div className="head"><button className="btn out" onClick={() => setOpenT(null)}>← Back to teachers</button></div>
+        <div className="head"><button className="btn out" onClick={() => setOpenT(null)}>← Back to teachers</button>{isMgr && <button className="btn out" style={{ marginLeft: 8 }} onClick={() => openTeacher(dt)}>Edit teacher</button>}</div>
         <div className="head" style={{ justifyContent: 'flex-start', gap: 14 }}><span className="tid" style={{ fontSize: 20 }}>{dt.username}</span><div><h3 style={{ margin: 0, fontSize: 22 }}>{dt.full_name}</h3><small style={{ color: '#7a6d8a' }}>{dt.phone ? 'Contact: ' + dt.phone : ''}</small></div></div>
         <div className="cards">
           <div><b>{new Set(list.map((x) => x.s.id)).size}</b><span>Students</span></div>
           <div><b>{unitsOf(dt.id)}</b><span>Total classes</span></div>
           <div><b>{unitsOf(dt.id, isToday)}</b><span>Classes today (PKT)</span></div>
         </div>
-        <table><thead><tr><th>Roll No</th><th>Student</th><th>Classes</th><th>Country / State</th><th>Student&apos;s schedule</th><th>Pakistan day &amp; time</th></tr></thead>
-          <tbody>{list.length === 0 && <tr><td colSpan="6" className="empty">No classes assigned to this teacher yet.</td></tr>}
-            {list.map(({ c, s, k }) => <tr key={c.id}><td><span className="pk">{s.roll_no || '-'}</span></td><td><b>{s.name}</b></td><td><b>{s.num_classes || 1}</b></td><td>{s.country} / {s.state}</td><td>{dayNames(c.weekdays)} {c.local_time.slice(0, 5)}</td><td><span className="pk">{dayNames(k.days)} {k.time}</span></td></tr>)}</tbody></table>
+        <table><thead><tr><th>Roll No</th><th>Student</th><th>Classes</th><th>Country / State</th><th>Student&apos;s schedule</th><th>Pakistan day &amp; time</th>{isMgr && <th></th>}</tr></thead>
+          <tbody>{list.length === 0 && <tr><td colSpan="7" className="empty">No classes assigned to this teacher yet.</td></tr>}
+            {list.map(({ c, s, k }) => <tr key={c.id}><td><span className="pk">{s.roll_no || '-'}</span></td><td><b>{s.name}</b></td><td><b>{s.num_classes || 1}</b></td><td>{s.country} / {s.state}</td><td>{dayNames(c.weekdays)} {c.local_time.slice(0, 5)}</td><td><span className="pk">{dayNames(k.days)} {k.time}</span></td>{isMgr && <td><button className="btn edit" onClick={() => openClass(c)}>Edit</button></td>}</tr>)}</tbody></table>
         
       </div>);
     })()}
@@ -185,9 +203,9 @@ export default function Dashboard() {
           {students.filter((s) => !q || (s.name + ' ' + (s.roll_no || '')).toLowerCase().includes(q.toLowerCase())).map((s) => {
             const mine = classes.filter((c) => c.student_id === s.id);
             return (<tr key={s.id}><td><span className="pk">{s.roll_no || '-'}</span></td><td><b>{s.name}</b></td><td><b>{s.num_classes || 1}</b><span className="sub">{mine.length} scheduled</span></td>
-              <td>{mine.length ? mine.map((c) => { const t = byId(teachers, c.teacher_id), k = pkSlot(c.local_time, s.tz, c.weekdays); return <div className="line" key={c.id}><span className="tid">{t?.username}</span> {t?.full_name} — <span className="pk">{dayNames(k.days)} {k.time}</span></div>; }) : <span style={{ color: '#7a6d8a' }}>Not assigned</span>}</td>
+              <td>{mine.length ? mine.map((c) => { const t = byId(teachers, c.teacher_id), k = pkSlot(c.local_time, s.tz, c.weekdays); return <div className="line" key={c.id}><span className="tid">{t?.username}</span> {t?.full_name} — <span className="pk">{dayNames(k.days)} {k.time}</span>{isMgr && <button className="link" style={{ marginLeft: 8 }} onClick={() => openClass(c)}>edit</button>}</div>; }) : <span style={{ color: '#7a6d8a' }}>Not assigned</span>}</td>
               <td>{s.country}</td><td>{s.state}</td><td>{nowIn(s.tz)}</td>
-              {isMgr && <td style={{ whiteSpace: 'nowrap' }}><button className="btn edit" onClick={() => editNum(s)}>Edit classes</button><button className="btn sm" onClick={() => del('students', s.id, s.name)}>Delete</button></td>}</tr>); })}</tbody></table></div>}
+              {isMgr && <td style={{ whiteSpace: 'nowrap' }}><button className="btn edit" onClick={() => openStudent(s)}>Edit</button><button className="btn sm" onClick={() => del('students', s.id, s.name)}>Delete</button></td>}</tr>); })}</tbody></table></div>}
 
     {tab === 'add' && isMgr && <div className="grid">
       <div className="panel form"><h3>1. Add teacher</h3>
@@ -210,5 +228,25 @@ export default function Dashboard() {
         <label>Days (student&apos;s local days)</label><div className="days">{DAYS.map((d, i) => <span key={d} className={'day' + (f.days.includes(i + 1) ? ' on' : '')} onClick={() => toggleDay(i + 1)}>{d}</span>)}</div>
         <button className="btn" onClick={addClass}>Add class</button><div className="hint">Pakistan day and time are calculated automatically.</div></div>
     </div>}
+    {ed && isMgr && <div className="modal-bg" onClick={() => setEd(null)}><div className="modal form" onClick={(x) => x.stopPropagation()}>
+      <h3>Edit {ed.kind}</h3>
+      {ed.kind === 'student' && <>
+        <label>Roll number</label><input value={ed.roll} onChange={(e) => setE('roll', e.target.value)} />
+        <label>Student name</label><input value={ed.name} onChange={(e) => setE('name', e.target.value)} />
+        <label>Country</label><select value={ed.country} onChange={(e) => setEd((o) => ({ ...o, country: e.target.value, state: Object.keys(COUNTRIES[e.target.value])[0] }))}>{COUNTRY_LIST.map((c) => <option key={c}>{c}</option>)}</select>
+        <label>State / Region</label><select value={ed.state} onChange={(e) => setE('state', e.target.value)}>{Object.keys(COUNTRIES[ed.country]).map((st) => <option key={st}>{st}</option>)}</select>
+        <label>How many classes does the student take?</label><select value={ed.nc} onChange={(e) => setE('nc', e.target.value)}>{[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n} {n === 1 ? 'class' : 'classes'}</option>)}</select>
+        <div className="hint">30 min = 1 class, 1 hour = 2 classes. The teacher&apos;s class count follows this number.</div></>}
+      {ed.kind === 'teacher' && <>
+        <label>Full name</label><input value={ed.name} onChange={(e) => setE('name', e.target.value)} />
+        <label>Contact number</label><input value={ed.phone} onChange={(e) => setE('phone', e.target.value)} /></>}
+      {ed.kind === 'class' && <>
+        <label>Teacher</label><select value={ed.teacher} onChange={(e) => setE('teacher', e.target.value)}>{teachers.map((t) => <option key={t.id} value={t.id}>{t.username} - {t.full_name}</option>)}</select>
+        <label>Student</label><select value={ed.student} onChange={(e) => setE('student', e.target.value)}>{students.map((st) => <option key={st.id} value={st.id}>{st.roll_no ? st.roll_no + ' - ' : ''}{st.name} ({st.state}, {st.country})</option>)}</select>
+        <label>Class time (student&apos;s local time)</label><input type="time" value={ed.time} onChange={(e) => setE('time', e.target.value)} />
+        <label>Days (student&apos;s local days)</label><div className="days">{DAYS.map((d, i) => <span key={d} className={'day' + (ed.days.includes(i + 1) ? ' on' : '')} onClick={() => setE('days', ed.days.includes(i + 1) ? ed.days.filter((x) => x !== i + 1) : [...ed.days, i + 1])}>{d}</span>)}</div></>}
+      {edErr && <div className="err">{edErr}</div>}
+      <div className="mrow"><button className="btn out" onClick={() => setEd(null)}>Cancel</button><button className="btn" onClick={saveEdit}>Save changes</button></div>
+    </div></div>}
   </div></>);
 }
