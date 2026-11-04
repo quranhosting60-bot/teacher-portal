@@ -5,7 +5,7 @@ import { supabase } from '../../lib/supabase';
 import { pkSlot, pkNow, dayNames, nowIn, DAYS } from '../../lib/time';
 import { COUNTRIES } from '../../lib/zones';
 
-const COUNTRY_LIST = Object.keys(COUNTRIES);
+const COUNTRY_LIST = Object.keys(COUNTRIES).sort((a, b) => a.localeCompare(b));
 const when = (d) => new Date(d).toLocaleString('en-GB', { timeZone: 'Asia/Karachi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase() + ' PKT';
 
 export default function Dashboard() {
