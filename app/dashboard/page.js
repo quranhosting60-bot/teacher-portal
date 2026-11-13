@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
-import { pkSlot, pkNow, dayNames, nowIn, DAYS } from '../../lib/time';
+import { pkSlot, pkNow, pkMins, pkDate, dayNames, nowIn, DAYS } from '../../lib/time';
 import { COUNTRIES } from '../../lib/zones';
 
 const COUNTRY_LIST = Object.keys(COUNTRIES).sort((a, b) => a.localeCompare(b));
@@ -16,13 +16,15 @@ export default function Dashboard() {
   const [students, setStudents] = useState([]);
   const [classes, setClasses] = useState([]);
   const [anns, setAnns] = useState([]);
+  const [att, setAtt] = useState([]);
+  const [, setTick] = useState(0);
   const [annText, setAnnText] = useState('');
   const [showAll, setShowAll] = useState(false);
   const [openT, setOpenT] = useState(null);
   const [ed, setEd] = useState(null);
   const [edErr, setEdErr] = useState('');
   const [msg, setMsg] = useState('');
-  const [tab, setTab] = useState('schedule');
+  const [tab, setTab] = useState('today');
   const [filter, setFilter] = useState('');
   const [q, setQ] = useState('');
   const [f, setF] = useState({ tn: '', tp: '', tpw: '', sn: '', roll: '', nc: '1', country: 'United States', state: 'Alabama', ct: '', cs: '', time: '18:00', days: [] });
@@ -34,6 +36,7 @@ export default function Dashboard() {
     const { data: p } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
     setMe(p);
     setAnns((await supabase.from('announcements').select('*').order('created_at', { ascending: false }).limit(30)).data || []);
+    setAtt((await supabase.from('attendance').select('*').gte('class_date', pkDate(-1))).data || []);
     if (p.role === 'teacher') {
       const { data } = await supabase.rpc('teacher_classes');
       setRows(data || []);
@@ -44,6 +47,15 @@ export default function Dashboard() {
     }
   }, [router]);
   useEffect(() => { load(); }, [load]);
+  const loadAtt = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    setAtt((await supabase.from('attendance').select('*').gte('class_date', pkDate(-1))).data || []);
+    setAnns((await supabase.from('announcements').select('*').order('created_at', { ascending: false }).limit(30)).data || []);
+  }, []);
+  useEffect(() => { const id = setInterval(() => { loadAtt(); setTick((t) => t + 1); }, 15000); return () => clearInterval(id); }, [loadAtt]);
+  const pendingN = me && me.role !== 'teacher' ? att.filter((a) => a.status === 'not_joined' && !a.manager_status).length : 0;
+  useEffect(() => { document.title = (pendingN ? `(${pendingN}) ` : '') + 'Quran Hosting'; }, [pendingN]);
 
   async function addTeacher() {
     const { data: { session } } = await supabase.auth.getSession();
@@ -97,6 +109,17 @@ export default function Dashboard() {
     if (error) return setMsg('Error: ' + error.message);
     setAnnText(''); setMsg('Announcement posted.'); load();
   }
+  async function markAtt(r, status) {
+    if (status === 'not_joined' && !confirm(`Mark ${r.student_name} as NOT joined? The manager will be notified.`)) return;
+    const { error } = await supabase.from('attendance').upsert({ class_id: r.class_id, student_id: r.student_id, teacher_id: me.id, class_date: pkDate(), status, marked_at: new Date().toISOString() }, { onConflict: 'class_id,class_date' });
+    if (error) return setMsg('Error: ' + error.message);
+    setMsg(status === 'joined' ? `${r.student_name} marked as joined.` : `Manager has been informed about ${r.student_name}.`); loadAtt();
+  }
+  async function resolveAtt(a, ms) {
+    const { error } = await supabase.from('attendance').update({ manager_status: ms, resolved_by: me.id, resolved_at: new Date().toISOString() }).eq('id', a.id);
+    if (error) return setMsg('Error: ' + error.message);
+    loadAtt();
+  }
   async function del(table, id, label) {
     if (!confirm(`Delete ${label}?`)) return;
     const { error } = await supabase.from(table).delete().eq('id', id);
@@ -108,6 +131,11 @@ export default function Dashboard() {
   if (!me) return <p style={{ padding: 20 }}>Loading...</p>;
   const isMgr = me.role === 'manager', isTeacher = me.role === 'teacher', canPost = !isTeacher;
   const byId = (list, id) => list.find((x) => x.id === id);
+  const now = pkNow(), today = pkDate();
+  const dateStr = new Date().toLocaleDateString('en-GB', { timeZone: 'Asia/Karachi', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const timeStr = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Karachi', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+  const fmtIn = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m} min`);
+  const attFor = (cid) => att.find((a) => a.class_id === cid && a.class_date === today);
   const myTotal = [...new Map(rows.map((r) => [r.student_id, r.num_classes || 1])).values()].reduce((a, b) => a + b, 0);
 
   const Header = (
@@ -132,37 +160,78 @@ export default function Dashboard() {
     </div>
   );
 
-  if (isTeacher) return (<>{Header}<div className="wrap">
-    {msg && <div className="msg">{msg}</div>}
-    {Ann}
-    <div className="profile">
-      <span className="tid">{me.username}</span>
-      <div><h2>{me.full_name}</h2><small>{me.phone ? 'Contact: ' + me.phone : 'Teacher'}</small></div>
-      <div className="big"><b>{myTotal}</b><span>Total classes</span></div>
-    </div>
-    <div className="panel"><h3>My classes <small style={{ fontWeight: 400, color: '#7a6d8a' }}>(Pakistan Time, PKT)</small></h3>
-      <table><thead><tr><th>#</th><th>Roll No</th><th>Student</th><th>Classes</th><th>Days (PKT)</th><th>Time (PKT)</th></tr></thead>
-        <tbody>{rows.length === 0 && <tr><td colSpan="6" className="empty">No classes assigned yet.</td></tr>}
-          {rows.map((r, i) => <tr key={r.class_id}><td>{i + 1}</td><td><span className="pk">{r.roll_no || '-'}</span></td><td><b>{r.student_name}</b></td><td><b>{r.num_classes || 1}</b></td><td>{dayNames(r.pk_days)}</td><td><span className="pk">{r.pk_time}</span></td></tr>)}</tbody></table>
-    </div></div></>);
+  if (isTeacher) {
+    const withM = (r) => ({ ...r, mins: pkMins(r.pk_time) });
+    const myToday = rows.filter((r) => (r.pk_days || []).includes(now.day)).map(withM).sort((a, b) => a.mins - b.mins);
+    const todayUnits = [...new Map(myToday.map((r) => [r.student_id, r.num_classes || 1])).values()].reduce((a, b) => a + b, 0);
+    const studentsN = new Set(rows.map((r) => r.student_id)).size;
+    const week = [1, 2, 3, 4, 5, 6, 7].map((d) => rows.filter((r) => (r.pk_days || []).includes(d)).map(withM).sort((a, b) => a.mins - b.mins));
+    const classCard = (r) => {
+      const a = attFor(r.class_id), late = now.mins - r.mins; let body;
+      if (a) body = a.status === 'joined' ? <div className="state ok">✅ Joined</div>
+        : <div className={'state ' + (a.manager_status === 'leave' ? 'leave' : a.manager_status === 'joining' ? 'ok' : 'bad')}>{a.manager_status === 'leave' ? '🌴 Student is on leave' : a.manager_status === 'joining' ? '📞 Student is joining' : '🔴 Marked not joined — manager informed'}</div>;
+      else if (late < 0) body = <div className="state wait">⏳ Starts in {fmtIn(-late)}</div>;
+      else if (late <= 120) body = <div className="abtns"><button className="abtn yes" onClick={() => markAtt(r, 'joined')}>✅ Joined</button><button className="abtn no" disabled={late < 5} onClick={() => markAtt(r, 'not_joined')}>{late < 5 ? `❌ Not joined (in ${5 - late} min)` : '❌ Not joined'}</button></div>;
+      else body = <div className="state mute">Time passed — not marked</div>;
+      return (<div className="cls" key={r.class_id}><div className="ctime">{r.pk_time}</div><div className="cmid"><b>{r.student_name}</b><span className="sub">Roll {r.roll_no || '-'}{(r.num_classes || 1) > 1 ? ` · ${r.num_classes} classes` : ''}</span>{body}</div></div>);
+    };
+    return (<>{Header}<div className="wrap">
+      {msg && <div className="msg">{msg}</div>}
+      <div className="hero"><span className="tid big">{me.username}</span><div><h2>Assalamu Alaikum, {me.full_name} 👋</h2><p>{dateStr} · {timeStr} PKT</p></div></div>
+      <div className="kpis">
+        <div className="kpi k1"><i>📚</i><b>{myTotal}</b><span>Total classes</span></div>
+        <div className="kpi k2"><i>🎓</i><b>{studentsN}</b><span>Students</span></div>
+        <div className="kpi k3"><i>📅</i><b>{todayUnits}</b><span>Classes today</span></div>
+      </div>
+      <div className="card"><div className="chead"><h3>📅 Today&apos;s classes</h3><span className="pk">{DAYS[now.day - 1]}</span></div>
+        {myToday.length === 0 && <div className="empty">No classes today 🌿</div>}
+        <div className="cgrid">{myToday.map(classCard)}</div></div>
+      {Ann}
+      <div className="card"><div className="chead"><h3>🗓️ My weekly timetable</h3><span className="hint">Pakistan time (PKT)</span></div>
+        <div className="week">{week.map((list, i) => <div key={i} className={'wday' + (now.day === i + 1 ? ' today' : '')}>
+          <div className="wh">{DAYS[i]}{now.day === i + 1 && <em>Today</em>}</div>
+          {list.length === 0 && <div className="wnone">—</div>}
+          {list.map((r) => <div className="wcls" key={r.class_id}><b>{r.pk_time}</b><span>{r.student_name}</span><small>Roll {r.roll_no || '-'}</small></div>)}</div>)}</div></div>
+    </div></>);
+  }
 
-  const now = pkNow();
   const slotsOf = (tid) => classes.filter((c) => c.teacher_id === tid).map((c) => { const s = byId(students, c.student_id); return s ? pkSlot(c.local_time, s.tz, c.weekdays) : null; }).filter(Boolean);
   const isToday = (c) => { const st = byId(students, c.student_id); return !!st && pkSlot(c.local_time, st.tz, c.weekdays).days.includes(now.day); };
   const unitsOf = (tid, only) => { const m = new Map(); classes.filter((c) => c.teacher_id === tid && (!only || only(c))).forEach((c) => { const st = byId(students, c.student_id); if (st) m.set(st.id, st.num_classes || 1); }); return [...m.values()].reduce((a, b) => a + b, 0); };
   const visible = classes.filter((c) => !filter || c.teacher_id === filter);
-  const tabs = [['schedule', 'Schedule'], ['teachers', 'Teachers'], ['students', 'Students'], ...(isMgr ? [['add', '+ Add New']] : [])];
+  const tabs = [['today', 'Today'], ['schedule', 'Schedule'], ['teachers', 'Teachers'], ['students', 'Students'], ...(isMgr ? [['add', '+ Add New']] : [])];
   const dt = openT ? byId(teachers, openT) : null;
+  const todayList = classes.map((c) => { const st = byId(students, c.student_id), t = byId(teachers, c.teacher_id); if (!st || !t) return null; const k = pkSlot(c.local_time, st.tz, c.weekdays); return k.days.includes(now.day) ? { c, s: st, t, k, a: attFor(c.id) } : null; }).filter(Boolean).sort((x, y) => x.k.mins - y.k.mins);
+  const pending = att.filter((a) => a.status === 'not_joined' && !a.manager_status).sort((x, y) => String(y.marked_at).localeCompare(String(x.marked_at)));
+  const handled = att.filter((a) => a.status === 'not_joined' && a.manager_status && a.class_date === today);
+  const infoOf = (a) => { const c = classes.find((x) => x.id === a.class_id), st = byId(students, a.student_id), t = byId(teachers, a.teacher_id); return { c, s: st, t, time: c && st ? pkSlot(c.local_time, st.tz, c.weekdays).time : '' }; };
+  const badgeOf = ({ a, k }) => a ? (a.status === 'joined' ? ['ok', '✅ Joined'] : a.manager_status === 'leave' ? ['leave', '🌴 On leave'] : a.manager_status === 'joining' ? ['ok', '📞 Joining'] : ['bad', '🔴 Not joined']) : (now.mins < k.mins ? ['wait', '⏳ Upcoming'] : now.mins <= k.mins + 120 ? ['wait', '🕒 Waiting for teacher'] : ['mute', 'Not marked']);
 
   return (<>{Header}<div className="wrap">
     {msg && <div className="msg">{msg}</div>}
-    {Ann}
-    <div className="stats">
-      <div className="stat"><b>{teachers.length}</b><span>Teachers</span></div>
-      <div className="stat"><b>{students.length}</b><span>Students</span></div>
-      <div className="stat"><b>{students.reduce((n, x) => n + (x.num_classes || 1), 0)}</b><span>Total classes</span></div>
+    <div className="hero"><div><h2>Assalamu Alaikum, {me.full_name} 👋</h2><p>{dateStr} · {timeStr} PKT</p></div><span className="role light">{me.role.toUpperCase()}</span></div>
+    <div className="kpis">
+      <div className="kpi k1"><i>👩‍🏫</i><b>{teachers.length}</b><span>Teachers</span></div>
+      <div className="kpi k2"><i>🎓</i><b>{students.length}</b><span>Students</span></div>
+      <div className="kpi k3"><i>📚</i><b>{students.reduce((n, x) => n + (x.num_classes || 1), 0)}</b><span>Total classes</span></div>
+      <div className="kpi k4"><i>📅</i><b>{todayList.length}</b><span>Classes scheduled today</span></div>
+    </div>
+    <div className="duo">
+      <div className={'card alerts' + (pending.length ? ' hot' : '')}><div className="chead"><h3>🔔 Attendance alerts</h3>{pending.length > 0 && <span className="count">{pending.length}</span>}</div>
+        {pending.length === 0 && <div className="hint">No pending alerts. All good ✅</div>}
+        {pending.map((a) => { const { s: st, t, time } = infoOf(a); return (<div className="alert" key={a.id}>
+          <div className="atext"><b>Roll {st?.roll_no || '-'} · {st?.name}</b> did not join<span className="sub">Teacher: {t?.username} {t?.full_name} · Class time {time} PKT</span></div>
+          {isMgr ? <div className="abtns2"><button className="abtn yes" onClick={() => resolveAtt(a, 'joining')}>Joining</button><button className="abtn leave" onClick={() => resolveAtt(a, 'leave')}>Leave</button></div> : <span className="pk">Waiting for manager</span>}</div>); })}
+        {handled.length > 0 && <details className="handled"><summary>Handled today ({handled.length})</summary>
+          {handled.map((a) => { const { s: st } = infoOf(a); return <div className="hl" key={a.id}>Roll {st?.roll_no || '-'} · {st?.name} — {a.manager_status === 'leave' ? '🌴 on leave' : '📞 joining'}</div>; })}</details>}
+      </div>
+      {Ann}
     </div>
     <div className="tabs">{tabs.map(([k, l]) => <button key={k} className={'tab' + (tab === k ? ' on' : '')} onClick={() => { setTab(k); setOpenT(null); }}>{l}</button>)}</div>
+
+    {tab === 'today' && <div className="card"><div className="chead"><h3>📅 Today&apos;s classes</h3><span className="pk">{DAYS[now.day - 1]}</span></div>
+      {todayList.length === 0 && <div className="empty">No classes today 🌿</div>}
+      <div className="cgrid">{todayList.map(({ c, s: st, t, k, a }) => { const [cls, label] = badgeOf({ a, k }); return (<div className="cls" key={c.id}><div className="ctime">{k.time}</div><div className="cmid"><b>{st.name}</b><span className="sub">Roll {st.roll_no || '-'} · {st.country}</span><span className="sub"><span className="tid sm">{t.username}</span> {t.full_name}</span><div className={'state ' + cls}>{label}</div></div></div>); })}</div></div>}
 
     {tab === 'schedule' && <div className="panel">
       <div className="head"><h3>Full schedule</h3>
@@ -173,11 +242,14 @@ export default function Dashboard() {
             return (<tr key={c.id}><td><span className="tid">{t?.username}</span> <b>{t?.full_name}</b></td><td><b>{s.roll_no || '-'}</b></td><td><b>{s.name}</b></td><td>{s.country} / {s.state}</td><td>{dayNames(c.weekdays)} {c.local_time.slice(0, 5)}</td>
               <td><span className="pk">{dayNames(k.days)} {k.time}</span></td><td>{nowIn(s.tz)}</td>{isMgr && <td style={{ whiteSpace: 'nowrap' }}><button className="btn edit" onClick={() => openClass(c)}>Edit</button><button className="btn sm" onClick={() => del('classes', c.id, 'this class')}>Delete</button></td>}</tr>); })}</tbody></table></div>}
 
-    {tab === 'teachers' && !dt && <div className="panel"><h3>Teachers <small style={{ fontWeight: 400, color: '#7a6d8a' }}>(click a teacher to see all students &amp; timings)</small></h3>
-      <table><thead><tr><th>ID</th><th>Name</th><th>Contact</th><th>Total classes</th><th>Classes today</th><th>Next class today</th><th></th></tr></thead>
-        <tbody>{teachers.length === 0 && <tr><td colSpan="7" className="empty">No teachers yet.</td></tr>}
-          {teachers.map((t) => { const sl = slotsOf(t.id), today = sl.filter((k) => k.days.includes(now.day)), next = today.filter((k) => k.mins >= now.mins).sort((a, b) => a.mins - b.mins)[0];
-            return (<tr key={t.id} style={{ cursor: 'pointer' }} onClick={() => setOpenT(t.id)}><td><span className="tid">{t.username}</span></td><td><b>{t.full_name}</b></td><td>{t.phone}</td><td><b>{unitsOf(t.id)}</b></td><td><b>{unitsOf(t.id, isToday)}</b></td><td>{next ? <span className="pk">{next.time}</span> : <span style={{ color: '#7a6d8a' }}>None remaining</span>}</td><td style={{ whiteSpace: 'nowrap' }}><button className="btn view" onClick={() => setOpenT(t.id)}>Open</button>{isMgr && <button className="btn edit" style={{ marginLeft: 6 }} onClick={(ev) => { ev.stopPropagation(); openTeacher(t); }}>Edit</button>}</td></tr>); })}</tbody></table></div>}
+    {tab === 'teachers' && !dt && <div className="cgrid tg">
+      {teachers.length === 0 && <div className="empty">No teachers yet.</div>}
+      {teachers.map((t) => { const todayS = slotsOf(t.id).filter((k) => k.days.includes(now.day)), next = todayS.filter((k) => k.mins >= now.mins).sort((a, b) => a.mins - b.mins)[0];
+        return (<div className="tcard" key={t.id} onClick={() => setOpenT(t.id)}>
+          <div className="trow"><span className="tid">{t.username}</span><div><b>{t.full_name}</b><span className="sub">{t.phone || 'No contact number'}</span></div></div>
+          <div className="mini"><div><b>{unitsOf(t.id)}</b><span>Total classes</span></div><div><b>{unitsOf(t.id, isToday)}</b><span>Today</span></div><div><b>{next ? next.time : '—'}</b><span>Next class</span></div></div>
+          <div className="trow2"><button className="btn view" onClick={() => setOpenT(t.id)}>Open</button>{isMgr && <button className="btn edit" onClick={(ev) => { ev.stopPropagation(); openTeacher(t); }}>Edit</button>}</div></div>); })}
+    </div>}
 
     {tab === 'teachers' && dt && (() => {
       const list = classes.filter((c) => c.teacher_id === dt.id).map((c) => { const s = byId(students, c.student_id); return s ? { c, s, k: pkSlot(c.local_time, s.tz, c.weekdays) } : null; }).filter(Boolean).sort((a, b) => a.k.mins - b.k.mins);
