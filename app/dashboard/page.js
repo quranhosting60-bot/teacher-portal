@@ -6,6 +6,59 @@ import { pkSlot, pkNow, pkMins, pkDate, dayNames, nowIn, DAYS } from '../../lib/
 import { COUNTRIES } from '../../lib/zones';
 
 const COUNTRY_LIST = Object.keys(COUNTRIES).sort((a, b) => a.localeCompare(b));
+const CSS = `
+/* ===== New dashboard design ===== */
+body{background:linear-gradient(180deg,#f6f0fc,#fbf9fe 320px,#f8f5fc)}
+.wrap{max-width:1180px}
+.panel,.card{background:#fff;border:1px solid var(--bd);border-radius:20px;padding:18px 20px;margin-bottom:18px;box-shadow:0 6px 22px #6b3fa012}
+.card{overflow:hidden}
+.chead{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}.chead h3{margin:0;color:var(--p2);font-size:18px}
+.hero{background:linear-gradient(120deg,#5b2f94,#b24bd0 70%,#e05bd0);color:#fff;border-radius:22px;padding:24px 26px;margin-bottom:18px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;justify-content:space-between;box-shadow:0 12px 30px #6b3fa033}
+.hero h2{margin:0 0 4px;font-size:24px}.hero p{margin:0;opacity:.9;font-size:14px}
+.hero .tid.big{background:#fff;color:var(--p2);font-size:24px;padding:12px 18px;border-radius:14px}
+.hero:has(.tid.big){justify-content:flex-start}
+.role.light{background:#ffffff33;color:#fff}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:18px}
+.kpi{border-radius:18px;padding:16px 18px;color:#fff;position:relative;overflow:hidden;box-shadow:0 8px 20px #0001}
+.kpi i{font-style:normal;font-size:26px;position:absolute;right:14px;top:12px;opacity:.9}
+.kpi b{display:block;font-size:34px;line-height:1.1}.kpi span{font-size:13px;opacity:.95}
+.k1{background:linear-gradient(135deg,#6b3fa0,#9a4fc4)}.k2{background:linear-gradient(135deg,#d048b8,#ef7fd9)}.k3{background:linear-gradient(135deg,#3f7fd0,#6aa5ef)}.k4{background:linear-gradient(135deg,#2fa57a,#5cc9a0)}
+.duo{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px;margin-bottom:6px;align-items:start}.duo>*{margin-bottom:0!important}
+.tabs{margin-top:18px}
+.tab{border-radius:999px;padding:10px 20px;font-weight:600}
+.cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+.cgrid.tg{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.cls{display:flex;gap:12px;background:#fcfaff;border:1px solid var(--bd);border-radius:16px;padding:12px}
+.ctime{background:linear-gradient(160deg,var(--p),var(--pink));color:#fff;border-radius:12px;padding:10px 8px;min-width:78px;text-align:center;font-weight:800;font-size:15px;display:flex;align-items:center;justify-content:center;line-height:1.2}
+.cmid{flex:1;min-width:0}.cmid b{font-size:16px;color:var(--tx)}
+.state{margin-top:8px;border-radius:10px;padding:8px 10px;font-size:13px;font-weight:700}
+.state.ok{background:#e6f7ee;color:#1d7a4c}.state.bad{background:#fdeaea;color:#c0392b}.state.leave{background:#fff3df;color:#b9770e}.state.wait{background:var(--soft);color:var(--p2)}.state.mute{background:#f1f1f4;color:#777}
+.abtns,.abtns2{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.abtns2{margin:0}
+.abtn{border:0;border-radius:12px;padding:12px 16px;font-size:15px;font-weight:700;cursor:pointer;color:#fff;flex:1;min-height:46px}
+.abtn.yes{background:linear-gradient(90deg,#1f9d63,#35c486)}.abtn.no{background:linear-gradient(90deg,#d63c3c,#ef6a6a)}.abtn.leave{background:linear-gradient(90deg,#e08a1e,#f2b04a)}
+.abtn:disabled{opacity:.45;cursor:not-allowed}
+.tid.sm{font-size:11px;padding:2px 7px}
+.alerts.hot{border-color:#f0b6b6;background:linear-gradient(180deg,#fff7f7,#fff);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 6px 22px #d63c3c14}50%{box-shadow:0 6px 28px #d63c3c40}}
+.count{background:#d63c3c;color:#fff;border-radius:999px;padding:2px 11px;font-weight:800;font-size:14px}
+.alert{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px;border:1px solid #f4cccc;background:#fff;border-radius:14px;margin-bottom:10px}
+.alert .atext{flex:1;min-width:180px}.alert .abtns2 .abtn{padding:10px 18px;min-height:42px;flex:none}
+.handled{margin-top:8px;font-size:13px;color:var(--mut)}.handled .hl{padding:4px 0;color:var(--tx)}
+.week{display:grid;grid-template-columns:repeat(auto-fit,minmax(138px,1fr));gap:10px}
+.wday{background:#fcfaff;border:1px solid var(--bd);border-radius:14px;padding:10px;min-height:110px}
+.wday.today{border:2px solid var(--pink);background:#fff7fd}
+.wh{font-weight:800;color:var(--p2);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}.wh em{font-style:normal;font-size:10px;background:var(--pink);color:#fff;border-radius:999px;padding:2px 8px}
+.wnone{color:#bbb;text-align:center;padding:10px 0}
+.wcls{background:#fff;border:1px solid var(--bd);border-left:4px solid var(--p);border-radius:10px;padding:6px 8px;margin-bottom:6px;font-size:13px}
+.wcls b{display:block;color:var(--p2)}.wcls span{display:block;font-weight:600}.wcls small{color:var(--mut)}
+.tcard{background:#fff;border:1px solid var(--bd);border-radius:18px;padding:16px;cursor:pointer;transition:.15s;box-shadow:0 4px 14px #6b3fa010}
+.tcard:hover{transform:translateY(-3px);box-shadow:0 12px 26px #6b3fa026;border-color:#d9c3f0}
+.trow{display:flex;align-items:center;gap:12px;margin-bottom:12px}.trow b{font-size:17px}
+.mini{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.mini div{background:var(--soft);border-radius:12px;padding:8px;text-align:center}.mini b{display:block;font-size:17px;color:var(--p2)}.mini span{font-size:11px;color:var(--mut)}
+.trow2{display:flex;gap:6px}
+@media(max-width:600px){.hero h2{font-size:19px}.kpi b{font-size:28px}.wrap{padding:14px}}
+`;
 const when = (d) => new Date(d).toLocaleString('en-GB', { timeZone: 'Asia/Karachi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase() + ' PKT';
 
 export default function Dashboard() {
@@ -139,15 +192,15 @@ export default function Dashboard() {
   const myTotal = [...new Map(rows.map((r) => [r.student_id, r.num_classes || 1])).values()].reduce((a, b) => a + b, 0);
 
   const Header = (
-    <div className="bar">
+    <><style>{CSS}</style><div className="bar">
       <div className="brand"><img src="/logo.png" alt="Quran Hosting" /><div><b>Quran Hosting</b><span>Class Portal</span></div></div>
       <div className="user"><span><b>{me.full_name}</b> <span className="role">{me.role.toUpperCase()}</span></span><button className="btn out" onClick={logout}>Sign out</button></div>
-    </div>
+    </div></>
   );
 
   const shown = showAll ? anns : anns.slice(0, 3);
   const Ann = (
-    <div className="panel ann"><h3>📢 Announcements</h3>
+    <div className="panel ann"><h3>Announcements</h3>
       {canPost && <div style={{ marginBottom: 10 }}>
         <textarea placeholder="Write an announcement for everyone..." value={annText} onChange={(e) => setAnnText(e.target.value)} />
         <div className="row"><button className="btn" onClick={postAnn}>Post announcement</button></div></div>}
@@ -168,26 +221,26 @@ export default function Dashboard() {
     const week = [1, 2, 3, 4, 5, 6, 7].map((d) => rows.filter((r) => (r.pk_days || []).includes(d)).map(withM).sort((a, b) => a.mins - b.mins));
     const classCard = (r) => {
       const a = attFor(r.class_id), late = now.mins - r.mins; let body;
-      if (a) body = a.status === 'joined' ? <div className="state ok">✅ Joined</div>
-        : <div className={'state ' + (a.manager_status === 'leave' ? 'leave' : a.manager_status === 'joining' ? 'ok' : 'bad')}>{a.manager_status === 'leave' ? '🌴 Student is on leave' : a.manager_status === 'joining' ? '📞 Student is joining' : '🔴 Marked not joined — manager informed'}</div>;
-      else if (late < 0) body = <div className="state wait">⏳ Starts in {fmtIn(-late)}</div>;
-      else if (late <= 120) body = <div className="abtns"><button className="abtn yes" onClick={() => markAtt(r, 'joined')}>✅ Joined</button><button className="abtn no" disabled={late < 5} onClick={() => markAtt(r, 'not_joined')}>{late < 5 ? `❌ Not joined (in ${5 - late} min)` : '❌ Not joined'}</button></div>;
+      if (a) body = a.status === 'joined' ? <div className="state ok">Joined</div>
+        : <div className={'state ' + (a.manager_status === 'leave' ? 'leave' : a.manager_status === 'joining' ? 'ok' : 'bad')}>{a.manager_status === 'leave' ? 'Student is on leave' : a.manager_status === 'joining' ? 'Student is joining' : 'Marked not joined — manager informed'}</div>;
+      else if (late < 0) body = <div className="state wait">Starts in {fmtIn(-late)}</div>;
+      else if (late <= 120) body = <div className="abtns"><button className="abtn yes" onClick={() => markAtt(r, 'joined')}>Joined</button><button className="abtn no" disabled={late < 5} onClick={() => markAtt(r, 'not_joined')}>{late < 5 ? `Not joined (in ${5 - late} min)` : 'Not joined'}</button></div>;
       else body = <div className="state mute">Time passed — not marked</div>;
       return (<div className="cls" key={r.class_id}><div className="ctime">{r.pk_time}</div><div className="cmid"><b>{r.student_name}</b><span className="sub">Roll {r.roll_no || '-'}{(r.num_classes || 1) > 1 ? ` · ${r.num_classes} classes` : ''}</span>{body}</div></div>);
     };
     return (<>{Header}<div className="wrap">
       {msg && <div className="msg">{msg}</div>}
-      <div className="hero"><span className="tid big">{me.username}</span><div><h2>Assalamu Alaikum, {me.full_name} 👋</h2><p>{dateStr} · {timeStr} PKT</p></div></div>
+      <div className="hero"><span className="tid big">{me.username}</span><div><h2>Welcome, {me.full_name}</h2><p>{dateStr} · {timeStr} PKT</p></div></div>
       <div className="kpis">
-        <div className="kpi k1"><i>📚</i><b>{myTotal}</b><span>Total classes</span></div>
-        <div className="kpi k2"><i>🎓</i><b>{studentsN}</b><span>Students</span></div>
-        <div className="kpi k3"><i>📅</i><b>{todayUnits}</b><span>Classes today</span></div>
+        <div className="kpi k1"><b>{myTotal}</b><span>Total classes</span></div>
+        <div className="kpi k2"><b>{studentsN}</b><span>Students</span></div>
+        <div className="kpi k3"><b>{todayUnits}</b><span>Classes today</span></div>
       </div>
-      <div className="card"><div className="chead"><h3>📅 Today&apos;s classes</h3><span className="pk">{DAYS[now.day - 1]}</span></div>
-        {myToday.length === 0 && <div className="empty">No classes today 🌿</div>}
+      <div className="card"><div className="chead"><h3>Today&apos;s classes</h3><span className="pk">{DAYS[now.day - 1]}</span></div>
+        {myToday.length === 0 && <div className="empty">No classes today</div>}
         <div className="cgrid">{myToday.map(classCard)}</div></div>
       {Ann}
-      <div className="card"><div className="chead"><h3>🗓️ My weekly timetable</h3><span className="hint">Pakistan time (PKT)</span></div>
+      <div className="card"><div className="chead"><h3>My weekly timetable</h3><span className="hint">Pakistan time (PKT)</span></div>
         <div className="week">{week.map((list, i) => <div key={i} className={'wday' + (now.day === i + 1 ? ' today' : '')}>
           <div className="wh">{DAYS[i]}{now.day === i + 1 && <em>Today</em>}</div>
           {list.length === 0 && <div className="wnone">—</div>}
@@ -205,32 +258,32 @@ export default function Dashboard() {
   const pending = att.filter((a) => a.status === 'not_joined' && !a.manager_status).sort((x, y) => String(y.marked_at).localeCompare(String(x.marked_at)));
   const handled = att.filter((a) => a.status === 'not_joined' && a.manager_status && a.class_date === today);
   const infoOf = (a) => { const c = classes.find((x) => x.id === a.class_id), st = byId(students, a.student_id), t = byId(teachers, a.teacher_id); return { c, s: st, t, time: c && st ? pkSlot(c.local_time, st.tz, c.weekdays).time : '' }; };
-  const badgeOf = ({ a, k }) => a ? (a.status === 'joined' ? ['ok', '✅ Joined'] : a.manager_status === 'leave' ? ['leave', '🌴 On leave'] : a.manager_status === 'joining' ? ['ok', '📞 Joining'] : ['bad', '🔴 Not joined']) : (now.mins < k.mins ? ['wait', '⏳ Upcoming'] : now.mins <= k.mins + 120 ? ['wait', '🕒 Waiting for teacher'] : ['mute', 'Not marked']);
+  const badgeOf = ({ a, k }) => a ? (a.status === 'joined' ? ['ok', 'Joined'] : a.manager_status === 'leave' ? ['leave', 'On leave'] : a.manager_status === 'joining' ? ['ok', 'Joining'] : ['bad', 'Not joined']) : (now.mins < k.mins ? ['wait', 'Upcoming'] : now.mins <= k.mins + 120 ? ['wait', 'Waiting for teacher'] : ['mute', 'Not marked']);
 
   return (<>{Header}<div className="wrap">
     {msg && <div className="msg">{msg}</div>}
-    <div className="hero"><div><h2>Assalamu Alaikum, {me.full_name} 👋</h2><p>{dateStr} · {timeStr} PKT</p></div><span className="role light">{me.role.toUpperCase()}</span></div>
+    <div className="hero"><div><h2>Welcome, {me.full_name}</h2><p>{dateStr} · {timeStr} PKT</p></div><span className="role light">{me.role.toUpperCase()}</span></div>
     <div className="kpis">
-      <div className="kpi k1"><i>👩‍🏫</i><b>{teachers.length}</b><span>Teachers</span></div>
-      <div className="kpi k2"><i>🎓</i><b>{students.length}</b><span>Students</span></div>
-      <div className="kpi k3"><i>📚</i><b>{students.reduce((n, x) => n + (x.num_classes || 1), 0)}</b><span>Total classes</span></div>
-      <div className="kpi k4"><i>📅</i><b>{todayList.length}</b><span>Classes scheduled today</span></div>
+      <div className="kpi k1"><b>{teachers.length}</b><span>Teachers</span></div>
+      <div className="kpi k2"><b>{students.length}</b><span>Students</span></div>
+      <div className="kpi k3"><b>{students.reduce((n, x) => n + (x.num_classes || 1), 0)}</b><span>Total classes</span></div>
+      <div className="kpi k4"><b>{todayList.length}</b><span>Classes scheduled today</span></div>
     </div>
     <div className="duo">
-      <div className={'card alerts' + (pending.length ? ' hot' : '')}><div className="chead"><h3>🔔 Attendance alerts</h3>{pending.length > 0 && <span className="count">{pending.length}</span>}</div>
-        {pending.length === 0 && <div className="hint">No pending alerts. All good ✅</div>}
+      <div className={'card alerts' + (pending.length ? ' hot' : '')}><div className="chead"><h3>Attendance alerts</h3>{pending.length > 0 && <span className="count">{pending.length}</span>}</div>
+        {pending.length === 0 && <div className="hint">No pending alerts. All good </div>}
         {pending.map((a) => { const { s: st, t, time } = infoOf(a); return (<div className="alert" key={a.id}>
           <div className="atext"><b>Roll {st?.roll_no || '-'} · {st?.name}</b> did not join<span className="sub">Teacher: {t?.username} {t?.full_name} · Class time {time} PKT</span></div>
           {isMgr ? <div className="abtns2"><button className="abtn yes" onClick={() => resolveAtt(a, 'joining')}>Joining</button><button className="abtn leave" onClick={() => resolveAtt(a, 'leave')}>Leave</button></div> : <span className="pk">Waiting for manager</span>}</div>); })}
         {handled.length > 0 && <details className="handled"><summary>Handled today ({handled.length})</summary>
-          {handled.map((a) => { const { s: st } = infoOf(a); return <div className="hl" key={a.id}>Roll {st?.roll_no || '-'} · {st?.name} — {a.manager_status === 'leave' ? '🌴 on leave' : '📞 joining'}</div>; })}</details>}
+          {handled.map((a) => { const { s: st } = infoOf(a); return <div className="hl" key={a.id}>Roll {st?.roll_no || '-'} · {st?.name} — {a.manager_status === 'leave' ? 'on leave' : 'joining'}</div>; })}</details>}
       </div>
       {Ann}
     </div>
     <div className="tabs">{tabs.map(([k, l]) => <button key={k} className={'tab' + (tab === k ? ' on' : '')} onClick={() => { setTab(k); setOpenT(null); }}>{l}</button>)}</div>
 
-    {tab === 'today' && <div className="card"><div className="chead"><h3>📅 Today&apos;s classes</h3><span className="pk">{DAYS[now.day - 1]}</span></div>
-      {todayList.length === 0 && <div className="empty">No classes today 🌿</div>}
+    {tab === 'today' && <div className="card"><div className="chead"><h3>Today&apos;s classes</h3><span className="pk">{DAYS[now.day - 1]}</span></div>
+      {todayList.length === 0 && <div className="empty">No classes today</div>}
       <div className="cgrid">{todayList.map(({ c, s: st, t, k, a }) => { const [cls, label] = badgeOf({ a, k }); return (<div className="cls" key={c.id}><div className="ctime">{k.time}</div><div className="cmid"><b>{st.name}</b><span className="sub">Roll {st.roll_no || '-'} · {st.country}</span><span className="sub"><span className="tid sm">{t.username}</span> {t.full_name}</span><div className={'state ' + cls}>{label}</div></div></div>); })}</div></div>}
 
     {tab === 'schedule' && <div className="panel">
