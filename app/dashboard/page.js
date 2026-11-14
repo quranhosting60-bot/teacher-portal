@@ -93,6 +93,14 @@ body{background:linear-gradient(180deg,#f6f0fc,#fbf9fe 320px,#f8f5fc)}
 .tchip{background:#fff;border:1px solid var(--bd);border-radius:12px;padding:8px 10px;margin-bottom:8px;display:flex;justify-content:space-between;gap:8px;align-items:center}
 .trow2{flex-wrap:wrap}
 .scoreb{padding:10px;border:1px dashed var(--bd);border-radius:9px;font-weight:700;color:var(--p2);background:var(--soft)}
+
+.toasts{position:fixed;right:16px;bottom:16px;z-index:80;display:flex;flex-direction:column;gap:10px;max-width:360px}
+.toast{background:#fff;border:1px solid var(--bd);border-left:6px solid var(--p);border-radius:14px;padding:12px 14px;box-shadow:0 12px 30px #0003;cursor:pointer;animation:slidein .25s ease}
+.toast.alert{border-left-color:#d63c3c}.toast b{display:block;color:var(--p2);margin-bottom:2px}.toast span{font-size:13px;line-height:1.4}
+@keyframes slidein{from{transform:translateY(20px);opacity:0}to{transform:none;opacity:1}}
+.nbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-radius:14px;padding:12px 16px;margin-bottom:16px;background:#fff7e6;border:1px solid #f2d9a3}
+.nbar.ok{background:#f1fbf6;border-color:#bfe6d0;font-size:13px;padding:8px 14px}
+.nbar .btn{width:auto;margin:0;padding:8px 16px}
 `;
 const SUBJECTS = [['qaida', 'Qaida'], ['quran', 'Quran'], ['islamic', 'Islamic Course'], ['arabic', 'Arabic Course']];
 const SUBJ = Object.fromEntries(SUBJECTS);
@@ -109,6 +117,21 @@ const downloadCSV = (name, head, rows) => {
   const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const csv = [head, ...rows].map((r) => r.map(esc).join(',')).join('\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv' })); a.download = name; a.click(); URL.revokeObjectURL(a.href);
+};
+let actx = null;
+const unlockAudio = () => { try { if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === 'suspended') actx.resume(); } catch (e) {} };
+const playTune = (kind) => {
+  try {
+    unlockAudio(); if (!actx) return;
+    const t0 = actx.currentTime;
+    const notes = kind === 'alert' ? [[880, 0], [1175, 0.18], [1568, 0.36], [1175, 0.7], [1568, 0.88], [1760, 1.06]] : [[784, 0], [1047, 0.2]];
+    notes.forEach(([f, d]) => {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t0 + d); g.gain.exponentialRampToValueAtTime(0.35, t0 + d + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + d + 0.34);
+      o.connect(g); g.connect(actx.destination); o.start(t0 + d); o.stop(t0 + d + 0.36);
+    });
+  } catch (e) {}
 };
 const when = (d) => new Date(d).toLocaleString('en-GB', { timeZone: 'Asia/Karachi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase() + ' PKT';
 
@@ -136,6 +159,12 @@ export default function Dashboard() {
   const [repTests, setRepTests] = useState([]);
   const [showFull, setShowFull] = useState(false);
   const purged = useRef(false);
+  const meRef = useRef(null);
+  const dataRef = useRef({ students: [], teachers: [], classes: [], rows: [] });
+  const seen = useRef(new Set());
+  const seeded = useRef(false);
+  const [toasts, setToasts] = useState([]);
+  const [notifPerm, setNotifPerm] = useState('default');
   const [, setTick] = useState(0);
   const [annText, setAnnText] = useState('');
   const [showAll, setShowAll] = useState(false);
@@ -149,13 +178,45 @@ export default function Dashboard() {
   const [f, setF] = useState({ tn: '', tp: '', tpw: '', sn: '', roll: '', nc: '1', country: 'United States', state: 'Alabama', ct: '', cs: '', time: '18:00', days: [] });
   const set = (k, v) => setF((o) => ({ ...o, [k]: v }));
 
+  dataRef.current = { students, teachers, classes, rows };
+  const fire = useCallback((title, body, kind = 'alert') => {
+    playTune(kind);
+    setToasts((t) => [...t, { id: Date.now() + Math.random(), title, body, kind }].slice(-4));
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        const n = new Notification(title, { body, icon: '/logo.png', requireInteraction: kind === 'alert' });
+        n.onclick = () => { window.focus(); n.close(); };
+      }
+    } catch (e) {}
+  }, []);
+  const applyAtt = useCallback((list, role) => {
+    setAtt(list);
+    const d = dataRef.current;
+    list.forEach((a) => {
+      let key = null, fn = null;
+      if (role === 'manager' && a.status === 'not_joined' && !a.manager_status) {
+        key = a.id + '|nj';
+        fn = () => {
+          const st = d.students.find((x) => x.id === a.student_id), t = d.teachers.find((x) => x.id === a.teacher_id), c = d.classes.find((x) => x.id === a.class_id);
+          const time = c && st ? pkSlot(c.local_time, st.tz, c.weekdays).time : '';
+          fire('Student did not join', `Roll ${st?.roll_no || '-'} · ${st?.name || 'Student'} did not join. Teacher: ${t ? t.username + ' ' + t.full_name : ''}${time ? '. Class time ' + time + ' PKT' : ''}.`, 'alert');
+        };
+      } else if (role === 'teacher' && a.manager_status) {
+        key = a.id + '|' + a.manager_status;
+        fn = () => { const r = d.rows.find((x) => x.student_id === a.student_id); fire('Manager update', `${r?.student_name || 'Student'} ${a.manager_status === 'leave' ? 'is on leave' : 'is joining the class'}.`, 'info'); };
+      }
+      if (key && !seen.current.has(key)) { seen.current.add(key); if (seeded.current) fn(); }
+    });
+    seeded.current = true;
+  }, [fire]);
   const load = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return router.push('/');
     const { data: p } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
     setMe(p);
+    meRef.current = p;
     setAnns((await supabase.from('announcements').select('*').order('created_at', { ascending: false }).limit(30)).data || []);
-    setAtt((await supabase.from('attendance').select('*').gte('class_date', pkDate(-1))).data || []);
+    applyAtt((await supabase.from('attendance').select('*').gte('class_date', pkDate(-1))).data || [], p.role);
     if (p.role !== 'teacher' && !purged.current) { purged.current = true; supabase.rpc('purge_old_sheets').then(() => {}, () => {}); }
     if (p.role === 'teacher') {
       const { data } = await supabase.rpc('teacher_classes');
@@ -167,14 +228,14 @@ export default function Dashboard() {
       setStudents((await supabase.from('students').select('*').order('name')).data || []);
       setClasses((await supabase.from('classes').select('*')).data || []);
     }
-  }, [router]);
+  }, [router, applyAtt]);
   useEffect(() => { load(); }, [load]);
   const loadAtt = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
-    setAtt((await supabase.from('attendance').select('*').gte('class_date', pkDate(-1))).data || []);
+    if (!session || !meRef.current) return;
+    applyAtt((await supabase.from('attendance').select('*').gte('class_date', pkDate(-1))).data || [], meRef.current.role);
     setAnns((await supabase.from('announcements').select('*').order('created_at', { ascending: false }).limit(30)).data || []);
-  }, []);
+  }, [applyAtt]);
   useEffect(() => { const id = setInterval(() => { loadAtt(); setTick((t) => t + 1); }, 15000); return () => clearInterval(id); }, [loadAtt]);
   useEffect(() => {
     if (!me || me.role === 'teacher' || tab !== 'reports') return;
@@ -193,6 +254,22 @@ export default function Dashboard() {
       setRepTests(await fetchAll(() => supabase.from('tests').select('*').gte('test_date', start).lte('test_date', end).order('test_date')));
     })();
   }, [me, tab, repMonth]);
+  useEffect(() => {
+    if (!me) return;
+    const ch = supabase.channel('att-' + me.id).on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => loadAtt()).subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [me && me.id, loadAtt]);
+  useEffect(() => {
+    setNotifPerm(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission);
+    const un = () => unlockAudio();
+    window.addEventListener('click', un); window.addEventListener('keydown', un);
+    return () => { window.removeEventListener('click', un); window.removeEventListener('keydown', un); };
+  }, []);
+  useEffect(() => {
+    if (!toasts.length) return;
+    const id = setTimeout(() => setToasts((t) => t.slice(1)), 9000);
+    return () => clearTimeout(id);
+  }, [toasts]);
   const pendingN = me && me.role !== 'teacher' ? att.filter((a) => a.status === 'not_joined' && !a.manager_status).length : 0;
   useEffect(() => { document.title = (pendingN ? `(${pendingN}) ` : '') + 'Quran Hosting'; }, [pendingN]);
 
@@ -367,8 +444,20 @@ export default function Dashboard() {
   </div></div>);
   const myTotal = [...new Map(rows.map((r) => [r.student_id, r.num_classes || 1])).values()].reduce((a, b) => a + b, 0);
 
+  const enableNotif = async () => {
+    unlockAudio();
+    if (typeof Notification === 'undefined') return setMsg('This browser does not support desktop notifications.');
+    const perm = await Notification.requestPermission();
+    setNotifPerm(perm);
+    if (perm === 'granted') fire('Notifications are on', 'You will get an alert with a sound, even if another tab is open.', 'info');
+    else setMsg('Notifications are blocked. Click the lock icon next to the address bar and allow notifications for this site.');
+  };
+  const notifBanner = notifPerm === 'unsupported' ? null : notifPerm === 'granted'
+    ? <div className="nbar ok"><span>Alerts are on for this browser.</span><button className="link" onClick={() => fire('Test alert', 'This is how an alert looks and sounds.', 'info')}>Send a test</button></div>
+    : <div className="nbar"><span><b>Turn on notifications.</b> {isTeacher ? 'You will be told when the manager replies about a student.' : isMgr ? 'You will be alerted with a sound when a teacher reports that a student did not join.' : 'Enable alerts in this browser.'}</span><button className="btn" onClick={enableNotif}>Turn on notifications</button></div>;
+  const toastUI = toasts.length > 0 && (<div className="toasts">{toasts.map((t) => <div key={t.id} className={'toast ' + t.kind} onClick={() => setToasts((a) => a.filter((x) => x.id !== t.id))}><b>{t.title}</b><span>{t.body}</span></div>)}</div>);
   const Header = (
-    <><style>{CSS}</style><div className="bar">
+    <><style>{CSS}</style>{toastUI}<div className="bar">
       <div className="brand"><img src="/logo.png" alt="Quran Hosting" /><div><b>Quran Hosting</b><span>Class Portal</span></div></div>
       <div className="user"><span><b>{me.full_name}</b> <span className="role">{me.role.toUpperCase()}</span></span><button className="btn out" onClick={logout}>Sign out</button></div>
     </div></>
@@ -409,6 +498,7 @@ export default function Dashboard() {
     };
     return (<>{Header}<div className="wrap">
       {msg && <div className="msg">{msg}</div>}
+      {notifBanner}
       {lessonUI}{testUI}{histUI}
       <div className="hero"><span className="tid big">{me.username}</span><div><h2>Welcome, {me.full_name}</h2><p>{dateStr} · {timeStr} PKT</p></div></div>
       <div className="kpis">
@@ -488,6 +578,7 @@ export default function Dashboard() {
 
   return (<>{Header}<div className="wrap">
     {msg && <div className="msg">{msg}</div>}
+    {notifBanner}
     {histUI}
     <div className="hero"><div><h2>Welcome, {me.full_name}</h2><p>{dateStr} · {timeStr} PKT</p></div><span className="role light">{me.role.toUpperCase()}</span></div>
     <div className="kpis">
