@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
 import { pkSlot, pkNow, pkMins, pkDate, dayNames, nowIn, DAYS } from '../../lib/time';
@@ -80,6 +80,19 @@ body{background:linear-gradient(180deg,#f6f0fc,#fbf9fe 320px,#f8f5fc)}
 .filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:6px}
 .kpis.small{grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin:14px 0}.kpis.small .kpi b{font-size:26px}
 .k5{background:linear-gradient(135deg,#d63c3c,#ef6a6a)}.k6{background:linear-gradient(135deg,#e08a1e,#f2b04a)}
+
+.tgroups{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px}
+.tgroup{border:1px solid var(--bd);border-radius:16px;padding:12px;background:#fcfaff}
+.tghead{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.hcls{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--bd);border-radius:12px;padding:8px 10px;margin-bottom:8px}
+.ctime.sm{min-width:68px;padding:7px 6px;font-size:13px}
+.hmid{flex:1;min-width:0}.hcls .state{margin:0;white-space:nowrap}
+.tcols{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:14px}
+.tcol{border-radius:16px;padding:12px;border:1px solid var(--bd)}.tcol h4{margin:0 0 10px;color:var(--p2)}
+.tcol.good{background:#f1fbf6}.tcol.bad{background:#fff5f5}.tcol.none{background:#f6f6f9}
+.tchip{background:#fff;border:1px solid var(--bd);border-radius:12px;padding:8px 10px;margin-bottom:8px;display:flex;justify-content:space-between;gap:8px;align-items:center}
+.trow2{flex-wrap:wrap}
+.scoreb{padding:10px;border:1px dashed var(--bd);border-radius:9px;font-weight:700;color:var(--p2);background:var(--soft)}
 `;
 const SUBJECTS = [['qaida', 'Qaida'], ['quran', 'Quran'], ['islamic', 'Islamic Course'], ['arabic', 'Arabic Course']];
 const SUBJ = Object.fromEntries(SUBJECTS);
@@ -90,6 +103,13 @@ const fillFrom = (l) => (l ? { subject: l.subject, ql: l.qaida_lesson || '', qv:
 const lessonText = (l) => (l.subject === 'qaida' ? `Lesson: ${l.qaida_lesson || '-'}${l.qaida_verse ? ' | Verse: ' + l.qaida_verse : ''}` : l.subject === 'quran' ? `Surah ${SURAHS[(l.surah_no || 1) - 1][0]}, Ayah ${l.ayah_from} to ${l.ayah_to}` : l.details || '');
 const fmtD = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 async function fetchAll(q) { let out = [], from = 0; for (;;) { const { data, error } = await q().range(from, from + 999); if (error || !data) break; out = out.concat(data); if (data.length < 1000) break; from += 1000; } return out; }
+const fmtM = (m) => { const h = Math.floor(m / 60), mm = m % 60; return `${((h + 11) % 12) + 1}:${String(mm).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
+const fetchMyTests = () => fetchAll(() => supabase.from('tests').select('*').gte('test_date', pkDate(-45)).order('test_date'));
+const downloadCSV = (name, head, rows) => {
+  const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const csv = [head, ...rows].map((r) => r.map(esc).join(',')).join('\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv' })); a.download = name; a.click(); URL.revokeObjectURL(a.href);
+};
 const when = (d) => new Date(d).toLocaleString('en-GB', { timeZone: 'Asia/Karachi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase() + ' PKT';
 
 export default function Dashboard() {
@@ -110,6 +130,12 @@ export default function Dashboard() {
   const [repAtt, setRepAtt] = useState([]);
   const [repT, setRepT] = useState('');
   const [repQ, setRepQ] = useState('');
+  const [myTests, setMyTests] = useState([]);
+  const [tm, setTm] = useState(null);
+  const [tmErr, setTmErr] = useState('');
+  const [repTests, setRepTests] = useState([]);
+  const [showFull, setShowFull] = useState(false);
+  const purged = useRef(false);
   const [, setTick] = useState(0);
   const [annText, setAnnText] = useState('');
   const [showAll, setShowAll] = useState(false);
@@ -117,7 +143,7 @@ export default function Dashboard() {
   const [ed, setEd] = useState(null);
   const [edErr, setEdErr] = useState('');
   const [msg, setMsg] = useState('');
-  const [tab, setTab] = useState('today');
+  const [tab, setTab] = useState('schedule');
   const [filter, setFilter] = useState('');
   const [q, setQ] = useState('');
   const [f, setF] = useState({ tn: '', tp: '', tpw: '', sn: '', roll: '', nc: '1', country: 'United States', state: 'Alabama', ct: '', cs: '', time: '18:00', days: [] });
@@ -130,10 +156,12 @@ export default function Dashboard() {
     setMe(p);
     setAnns((await supabase.from('announcements').select('*').order('created_at', { ascending: false }).limit(30)).data || []);
     setAtt((await supabase.from('attendance').select('*').gte('class_date', pkDate(-1))).data || []);
+    if (p.role !== 'teacher' && !purged.current) { purged.current = true; supabase.rpc('purge_old_sheets').then(() => {}, () => {}); }
     if (p.role === 'teacher') {
       const { data } = await supabase.rpc('teacher_classes');
       setRows(data || []);
       setMyLessons(await fetchAll(() => supabase.from('lessons').select('*').gte('lesson_date', pkDate(-60)).order('lesson_date')));
+      setMyTests(await fetchMyTests());
     } else {
       setTeachers((await supabase.from('profiles').select('*').eq('role', 'teacher').order('username')).data || []);
       setStudents((await supabase.from('students').select('*').order('name')).data || []);
@@ -155,6 +183,14 @@ export default function Dashboard() {
       const start = `${repMonth}-01`, end = `${repMonth}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`;
       setRepLessons(await fetchAll(() => supabase.from('lessons').select('*').gte('lesson_date', start).lte('lesson_date', end).order('lesson_date')));
       setRepAtt(await fetchAll(() => supabase.from('attendance').select('*').gte('class_date', start).lte('class_date', end).order('class_date')));
+    })();
+  }, [me, tab, repMonth]);
+  useEffect(() => {
+    if (!me || me.role === 'teacher' || tab !== 'tests') return;
+    (async () => {
+      const [y, m] = repMonth.split('-').map(Number);
+      const start = `${repMonth}-01`, end = `${repMonth}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`;
+      setRepTests(await fetchAll(() => supabase.from('tests').select('*').gte('test_date', start).lte('test_date', end).order('test_date')));
     })();
   }, [me, tab, repMonth]);
   const pendingN = me && me.role !== 'teacher' ? att.filter((a) => a.status === 'not_joined' && !a.manager_status).length : 0;
@@ -244,7 +280,31 @@ export default function Dashboard() {
     setLs(null); setMsg(`Lesson sheet saved for ${x.r.student_name}.`);
     setMyLessons(await fetchAll(() => supabase.from('lessons').select('*').gte('lesson_date', pkDate(-60)).order('lesson_date')));
   }
-  const openHist = (r) => setHist({ title: 'Lesson history', roll: r.roll_no, name: r.student_name, list: myLessons.filter((l) => l.student_id === r.student_id).sort((a, b) => b.lesson_date.localeCompare(a.lesson_date)) });
+  const openHist = (r) => setHist({ title: 'Student history', roll: r.roll_no, name: r.student_name, canDelete: true, list: myLessons.filter((l) => l.student_id === r.student_id).sort((a, b) => b.lesson_date.localeCompare(a.lesson_date)), tests: myTests.filter((t) => t.student_id === r.student_id).sort((a, b) => b.test_date.localeCompare(a.test_date)) });
+  const openTest = (r) => { setTmErr(''); setTm({ r, date: pkDate(), lesson: '', total: '', correct: '', wrong: '', result: '' }); };
+  const setT = (k, v) => setTm((o) => {
+    const n = { ...o, [k]: v };
+    if (k === 'total' || k === 'correct') { const t = parseInt(n.total, 10), c = parseInt(n.correct, 10); if (t > 0 && !isNaN(c)) { n.result = c / t >= 0.7 ? 'good' : 'bad'; if (k === 'correct' || n.wrong === '') n.wrong = String(Math.max(0, t - c)); } }
+    return n;
+  });
+  async function saveTest() {
+    const x = tm, total = parseInt(x.total, 10), correct = parseInt(x.correct, 10), wrong = x.wrong === '' ? NaN : parseInt(x.wrong, 10);
+    if (!x.date || x.date > pkDate()) return setTmErr('Choose a valid date (not in the future).');
+    if (!x.lesson.trim()) return setTmErr('Enter the lesson that was tested.');
+    if (isNaN(total) || total < 1) return setTmErr('Enter how many questions were asked.');
+    if (isNaN(correct) || correct < 0 || isNaN(wrong) || wrong < 0) return setTmErr('Enter the correct and wrong answers.');
+    if (correct + wrong > total) return setTmErr('Correct plus wrong answers cannot be more than the questions asked.');
+    if (!x.result) return setTmErr('Select the test result (Good or Bad).');
+    const { error } = await supabase.from('tests').insert({ class_id: x.r.class_id, student_id: x.r.student_id, teacher_id: me.id, test_date: x.date, lesson: x.lesson.trim(), total_q: total, correct, wrong, result: x.result });
+    if (error) return setTmErr('Error: ' + error.message);
+    setTm(null); setMsg(`Test saved for ${x.r.student_name}.`); setMyTests(await fetchMyTests());
+  }
+  async function delTest(t) {
+    if (!confirm('Delete this test record?')) return;
+    const { error } = await supabase.from('tests').delete().eq('id', t.id);
+    if (error) return setMsg('Error: ' + error.message);
+    setHist((h) => h && { ...h, tests: (h.tests || []).filter((x) => x.id !== t.id) }); setMyTests(await fetchMyTests());
+  }
   async function del(table, id, label) {
     if (!confirm(`Delete ${label}?`)) return;
     const { error } = await supabase.from(table).delete().eq('id', id);
@@ -278,12 +338,32 @@ export default function Dashboard() {
   const histUI = hist && (<div className="modal-bg" onClick={() => setHist(null)}><div className="modal form wide" onClick={(e) => e.stopPropagation()}>
     <h3>{hist.title}</h3>
     <div className="who"><span className="pk">Roll {hist.roll || '-'}</span> <b>{hist.name}</b></div>
-    {hist.list.length === 0 && <div className="hint">No lesson sheets found.</div>}
-    <div className="hlist">{hist.list.map((l) => <div className="hrow" key={l.id}>
+    {(hist.list || []).length === 0 && !(hist.tests || []).length && <div className="hint">Nothing found.</div>}
+    {(hist.list || []).length > 0 && <div className="hs" style={{ margin: '10px 0 6px' }}><b>Lesson sheets</b></div>}
+    <div className="hlist">{(hist.list || []).map((l) => <div className="hrow" key={l.id}>
       <div className="hd"><b>{fmtD(l.lesson_date)}</b><span className={'pill p-' + l.performance}>{PERF[l.performance]}</span></div>
       <div className="hs">{SUBJ[l.subject]}{hist.showTeacher && byId(teachers, l.teacher_id) ? ' | ' + byId(teachers, l.teacher_id).full_name : ''}</div>
       <div>{lessonText(l)}</div></div>)}</div>
+    {(hist.tests || []).length > 0 && <div className="hs" style={{ margin: '12px 0 6px' }}><b>Tests</b></div>}
+    <div className="hlist">{(hist.tests || []).map((t) => <div className="hrow" key={t.id}>
+      <div className="hd"><b>{fmtD(t.test_date)}</b><span className={'pill ' + (t.result === 'good' ? 'p-excellent' : 'p-not_prepared')}>{t.result === 'good' ? 'Good' : 'Bad'}</span></div>
+      <div className="hs">Lesson: {t.lesson}{hist.showTeacher && byId(teachers, t.teacher_id) ? ' | ' + byId(teachers, t.teacher_id).full_name : ''}</div>
+      <div>Asked {t.total_q} | Correct {t.correct} | Wrong {t.wrong} | Score {Math.round((t.correct / t.total_q) * 100)}%</div>
+      {hist.canDelete && <button className="link" style={{ color: '#c0392b', marginTop: 4 }} onClick={() => delTest(t)}>Delete this test</button>}</div>)}</div>
     <div className="mrow"><button className="btn out" onClick={() => setHist(null)}>Close</button></div>
+  </div></div>);
+  const tPct = tm && parseInt(tm.total, 10) > 0 && tm.correct !== '' ? Math.round((parseInt(tm.correct, 10) / parseInt(tm.total, 10)) * 100) : null;
+  const testUI = tm && isTeacher && (<div className="modal-bg" onClick={() => setTm(null)}><div className="modal form" onClick={(e) => e.stopPropagation()}>
+    <h3>Student test</h3>
+    <div className="who"><span className="pk">Roll {tm.r.roll_no || '-'}</span> <b>{tm.r.student_name}</b></div>
+    <label>Date</label><input type="date" max={pkDate()} value={tm.date} onChange={(e) => setT('date', e.target.value)} />
+    <label>Lesson tested</label><input value={tm.lesson} onChange={(e) => setT('lesson', e.target.value)} placeholder="e.g. Qaida Lesson 5 or Surah Al-Fatihah" />
+    <div className="two"><div><label>Questions asked</label><input type="number" min="1" value={tm.total} onChange={(e) => setT('total', e.target.value)} /></div><div><label>Correct answers</label><input type="number" min="0" value={tm.correct} onChange={(e) => setT('correct', e.target.value)} /></div></div>
+    <div className="two"><div><label>Wrong answers</label><input type="number" min="0" value={tm.wrong} onChange={(e) => setT('wrong', e.target.value)} /></div><div><label>Score</label><div className="scoreb">{tPct === null ? '-' : tPct + '%'}</div></div></div>
+    <label>Test result</label><div className="chips">{[['good', 'Good', 'p-excellent'], ['bad', 'Bad', 'p-not_prepared']].map(([k, l, c]) => <span key={k} className={'chip ' + c + (tm.result === k ? ' on' : '')} onClick={() => setT('result', k)}>{l}</span>)}</div>
+    <div className="hint">The result is suggested from the score (70% or more is Good). You can change it.</div>
+    {tmErr && <div className="err">{tmErr}</div>}
+    <div className="mrow"><button className="btn out" onClick={() => setTm(null)}>Cancel</button><button className="btn" onClick={saveTest}>Save test</button></div>
   </div></div>);
   const myTotal = [...new Map(rows.map((r) => [r.student_id, r.num_classes || 1])).values()].reduce((a, b) => a + b, 0);
 
@@ -329,7 +409,7 @@ export default function Dashboard() {
     };
     return (<>{Header}<div className="wrap">
       {msg && <div className="msg">{msg}</div>}
-      {lessonUI}{histUI}
+      {lessonUI}{testUI}{histUI}
       <div className="hero"><span className="tid big">{me.username}</span><div><h2>Welcome, {me.full_name}</h2><p>{dateStr} · {timeStr} PKT</p></div></div>
       <div className="kpis">
         <div className="kpi k1"><b>{myTotal}</b><span>Total classes</span></div>
@@ -343,7 +423,7 @@ export default function Dashboard() {
         {myStudents.length === 0 && <div className="empty">No students assigned yet.</div>}
         <div className="cgrid">{myStudents.map((r) => { const doneT = myLessons.find((l) => l.student_id === r.student_id && l.lesson_date === today); return (<div className="scard" key={r.student_id}>
           <div><b>{r.student_name}</b><span className="sub">Roll {r.roll_no || '-'} · {r.num_classes || 1} {(r.num_classes || 1) === 1 ? 'class' : 'classes'}</span><span className={'sheet' + (doneT ? ' ok' : '')}>{doneT ? 'Today: ' + PERF[doneT.performance] : 'Today: not written'}</span></div>
-          <div className="trow2"><button className="btn view" onClick={() => openLesson(r)}>Write lesson</button><button className="btn edit" onClick={() => openHist(r)}>History</button></div></div>); })}</div></div>
+          <div className="trow2"><button className="btn view" onClick={() => openLesson(r)}>Write lesson</button><button className="btn view" onClick={() => openTest(r)}>Take test</button><button className="btn edit" onClick={() => openHist(r)}>History</button></div></div>); })}</div></div>
       {Ann}
       <div className="card"><div className="chead"><h3>My weekly timetable</h3><span className="hint">Pakistan time (PKT)</span></div>
         <div className="week">{week.map((list, i) => <div key={i} className={'wday' + (now.day === i + 1 ? ' today' : '')}>
@@ -357,9 +437,12 @@ export default function Dashboard() {
   const isToday = (c) => { const st = byId(students, c.student_id); return !!st && pkSlot(c.local_time, st.tz, c.weekdays).days.includes(now.day); };
   const unitsOf = (tid, only) => { const m = new Map(); classes.filter((c) => c.teacher_id === tid && (!only || only(c))).forEach((c) => { const st = byId(students, c.student_id); if (st) m.set(st.id, st.num_classes || 1); }); return [...m.values()].reduce((a, b) => a + b, 0); };
   const visible = classes.filter((c) => !filter || c.teacher_id === filter);
-  const tabs = [['today', 'Today'], ['schedule', 'Schedule'], ['teachers', 'Teachers'], ['students', 'Students'], ['reports', 'Lesson Reports'], ...(isMgr ? [['add', '+ Add New']] : [])];
+  const tabs = [['schedule', 'Schedule'], ['teachers', 'Teachers'], ['students', 'Students'], ['reports', 'Lesson Reports'], ['tests', 'Test Report'], ...(isMgr ? [['add', '+ Add New']] : [])];
   const dt = openT ? byId(teachers, openT) : null;
   const todayList = classes.map((c) => { const st = byId(students, c.student_id), t = byId(teachers, c.teacher_id); if (!st || !t) return null; const k = pkSlot(c.local_time, st.tz, c.weekdays); return k.days.includes(now.day) ? { c, s: st, t, k, a: attFor(c.id) } : null; }).filter(Boolean).sort((x, y) => x.k.mins - y.k.mins);
+  const hourStart = Math.floor(now.mins / 60) * 60;
+  const hourList = todayList.filter((x) => x.k.mins >= hourStart && x.k.mins < hourStart + 60);
+  const hourGroups = teachers.map((t) => [t, hourList.filter((x) => x.t.id === t.id)]).filter(([, l]) => l.length);
   const pending = att.filter((a) => a.status === 'not_joined' && !a.manager_status).sort((x, y) => String(y.marked_at).localeCompare(String(x.marked_at)));
   const handled = att.filter((a) => a.status === 'not_joined' && a.manager_status && a.class_date === today);
   const infoOf = (a) => { const c = classes.find((x) => x.id === a.class_id), st = byId(students, a.student_id), t = byId(teachers, a.teacher_id); return { c, s: st, t, time: c && st ? pkSlot(c.local_time, st.tz, c.weekdays).time : '' }; };
@@ -389,6 +472,17 @@ export default function Dashboard() {
     const cnt = (p) => ls2.filter((l) => l.performance === p).length;
     return { st, tids: [...new Set(cls.map((c) => c.teacher_id))], scheduled: sched.size, taken: taken.size, missed: [...sched].filter((k) => !taken.has(k)).length, leave: repAtt.filter((a) => a.student_id === st.id && ids.has(a.class_id) && a.manager_status === 'leave').length, ex: cnt('excellent'), good: cnt('good'), poor: cnt('poor'), np: cnt('not_prepared'), lessons: ls2 };
   }).filter(Boolean) : [];
+  const testRep = tab === 'tests' && !isTeacher ? students.map((st) => {
+    const cls = classes.filter((c) => c.student_id === st.id && (!repT || c.teacher_id === repT));
+    if (!cls.length) return null;
+    if (repQ && !(st.name + ' ' + (st.roll_no || '')).toLowerCase().includes(repQ.toLowerCase())) return null;
+    const ids = new Set(cls.map((c) => c.id));
+    const ts = repTests.filter((t) => t.student_id === st.id && ids.has(t.class_id)).sort((a, b) => b.test_date.localeCompare(a.test_date) || String(b.created_at).localeCompare(String(a.created_at)));
+    return { st, tids: [...new Set(cls.map((c) => c.teacher_id))], ts, last: ts[0], status: ts[0] ? ts[0].result : 'none' };
+  }).filter(Boolean) : [];
+  const tnames = (tids) => tids.map((id) => byId(teachers, id)?.username).filter(Boolean).join(', ');
+  const downloadReport = () => downloadCSV(`lesson-report-${repMonth}.csv`, ['Roll No', 'Student', 'Teacher', 'Scheduled', 'Taken', 'Not taken', 'On leave', 'Excellent', 'Good', 'Poor', 'Not prepared'], report.map((r) => [r.st.roll_no, r.st.name, tnames(r.tids), r.scheduled, r.taken, r.missed, r.leave, r.ex, r.good, r.poor, r.np]));
+  const downloadTests = () => downloadCSV(`test-report-${repMonth}.csv`, ['Roll No', 'Student', 'Teacher', 'Status', 'Tests taken', 'Latest lesson', 'Asked', 'Correct', 'Wrong'], testRep.map((r) => [r.st.roll_no, r.st.name, tnames(r.tids), r.status === 'none' ? 'Not taken' : r.status === 'good' ? 'Good' : 'Bad', r.ts.length, r.last ? r.last.lesson : '', r.ts.reduce((n, t) => n + t.total_q, 0), r.ts.reduce((n, t) => n + t.correct, 0), r.ts.reduce((n, t) => n + t.wrong, 0)]));
   const sum = (k) => report.reduce((n, r) => n + r[k], 0);
   const badgeOf = ({ a, k }) => a ? (a.status === 'joined' ? ['ok', 'Joined'] : a.manager_status === 'leave' ? ['leave', 'On leave'] : a.manager_status === 'joining' ? ['ok', 'Joining'] : ['bad', 'Not joined']) : (now.mins < k.mins ? ['wait', 'Upcoming'] : now.mins <= k.mins + 120 ? ['wait', 'Waiting for teacher'] : ['mute', 'Not marked']);
 
@@ -415,11 +509,16 @@ export default function Dashboard() {
     </div>
     <div className="tabs">{tabs.map(([k, l]) => <button key={k} className={'tab' + (tab === k ? ' on' : '')} onClick={() => { setTab(k); setOpenT(null); }}>{l}</button>)}</div>
 
-    {tab === 'today' && <div className="card"><div className="chead"><h3>Today&apos;s classes</h3><span className="pk">{DAYS[now.day - 1]}</span></div>
-      {todayList.length === 0 && <div className="empty">No classes today</div>}
-      <div className="cgrid">{todayList.map(({ c, s: st, t, k, a }) => { const [cls, label] = badgeOf({ a, k }); return (<div className="cls" key={c.id}><div className="ctime">{k.time}</div><div className="cmid"><b>{st.name}</b><span className="sub">Roll {st.roll_no || '-'} · {st.country}</span><span className="sub"><span className="tid sm">{t.username}</span> {t.full_name}</span><div className={'state ' + cls}>{label}</div></div></div>); })}</div></div>}
+    {tab === 'schedule' && <div className="card">
+      <div className="chead"><h3>Classes this hour</h3><span className="pk">{fmtM(hourStart)} - {fmtM(hourStart + 59)}</span></div>
+      {hourList.length === 0 && <div className="empty">No classes are scheduled in this hour.</div>}
+      <div className="tgroups">{hourGroups.map(([t, list]) => <div className="tgroup" key={t.id}>
+        <div className="tghead"><span className="tid">{t.username}</span><b>{t.full_name}</b><span className="sub">{list.length} {list.length === 1 ? 'class' : 'classes'}</span></div>
+        {list.map(({ c, s: st, k, a }) => { const [cls, label] = badgeOf({ a, k }); return (<div className="hcls" key={c.id}><span className="ctime sm">{k.time}</span><div className="hmid"><b>{st.name}</b><span className="sub">Roll {st.roll_no || '-'}</span></div><span className={'state ' + cls}>{label}</span></div>); })}</div>)}</div>
+      <button className="link" style={{ marginTop: 12 }} onClick={() => setShowFull(!showFull)}>{showFull ? 'Hide full timetable' : 'View full timetable'}</button>
+    </div>}
 
-    {tab === 'schedule' && <div className="panel">
+    {tab === 'schedule' && showFull && <div className="panel">
       <div className="head"><h3>Full schedule</h3>
         <select value={filter} onChange={(e) => setFilter(e.target.value)}><option value="">All teachers</option>{teachers.map((t) => <option key={t.id} value={t.id}>{t.username} - {t.full_name}</option>)}</select></div>
       <table><thead><tr><th>Teacher</th><th>Roll No</th><th>Student</th><th>Country / State</th><th>Student&apos;s schedule</th><th>Pakistan day &amp; time</th><th>Time there now</th>{isMgr && <th></th>}</tr></thead>
@@ -466,7 +565,7 @@ export default function Dashboard() {
               {isMgr && <td style={{ whiteSpace: 'nowrap' }}><button className="btn edit" onClick={() => openStudent(s)}>Edit</button><button className="btn sm" onClick={() => del('students', s.id, s.name)}>Delete</button></td>}</tr>); })}</tbody></table></div>}
 
     {tab === 'reports' && <div className="card">
-      <div className="chead"><h3>Monthly lesson report</h3></div>
+      <div className="chead"><h3>Monthly lesson report</h3><button className="btn out" onClick={downloadReport}>Download CSV</button></div>
       <div className="filters form">
         <div><label>Month</label><input type="month" max={today.slice(0, 7)} value={repMonth} onChange={(e) => e.target.value && setRepMonth(e.target.value)} /></div>
         <div><label>Teacher</label><select value={repT} onChange={(e) => setRepT(e.target.value)}><option value="">All teachers</option>{teachers.map((t) => <option key={t.id} value={t.id}>{t.username} - {t.full_name}</option>)}</select></div>
@@ -486,7 +585,27 @@ export default function Dashboard() {
             <td>{r.scheduled}</td><td><b>{r.taken}</b></td><td><b style={{ color: r.missed ? '#c0392b' : undefined }}>{r.missed}</b></td><td>{r.leave}</td>
             <td><span className="pill p-excellent">{r.ex}</span></td><td><span className="pill p-good">{r.good}</span></td><td><span className="pill p-poor">{r.poor}</span></td><td><span className="pill p-not_prepared">{r.np}</span></td>
             <td><button className="btn view" onClick={() => setHist({ title: 'Lesson sheets', roll: r.st.roll_no, name: r.st.name, showTeacher: true, list: [...r.lessons].sort((a, b) => b.lesson_date.localeCompare(a.lesson_date)) })}>View sheets</button></td></tr>)}</tbody></table></div>
-      <div className="hint">Taken = days with a lesson sheet or a Joined mark. Not taken = scheduled class days up to today with neither. Scheduled days use Pakistan time.</div>
+      <div className="hint">Taken = days with a lesson sheet or a Joined mark. Not taken = scheduled class days up to today with neither. Scheduled days use Pakistan time. Lesson sheets, tests and attendance are kept for one month only. Last month&apos;s data is deleted automatically on the 4th, so download the CSV before then.</div>
+    </div>}
+
+    {tab === 'tests' && <div className="card">
+      <div className="chead"><h3>Monthly test report</h3><button className="btn out" onClick={downloadTests}>Download CSV</button></div>
+      <div className="filters form">
+        <div><label>Month</label><input type="month" max={today.slice(0, 7)} value={repMonth} onChange={(e) => e.target.value && setRepMonth(e.target.value)} /></div>
+        <div><label>Teacher</label><select value={repT} onChange={(e) => setRepT(e.target.value)}><option value="">All teachers</option>{teachers.map((t) => <option key={t.id} value={t.id}>{t.username} - {t.full_name}</option>)}</select></div>
+        <div><label>Search student</label><input placeholder="Roll no or name" value={repQ} onChange={(e) => setRepQ(e.target.value)} /></div>
+      </div>
+      <div className="kpis small">
+        <div className="kpi k4"><b>{testRep.filter((r) => r.status === 'good').length}</b><span>Good test</span></div>
+        <div className="kpi k5"><b>{testRep.filter((r) => r.status === 'bad').length}</b><span>Bad test</span></div>
+        <div className="kpi k3"><b>{testRep.filter((r) => r.status === 'none').length}</b><span>Test not taken</span></div>
+        <div className="kpi k1"><b>{repTests.length}</b><span>Total tests</span></div>
+      </div>
+      <div className="tcols">{[['good', 'Good test'], ['bad', 'Bad test'], ['none', 'Test not taken']].map(([k, l]) => { const list = testRep.filter((r) => r.status === k); return (<div className={'tcol ' + k} key={k}><h4>{l} ({list.length})</h4>
+        {list.length === 0 && <div className="hint">No students</div>}
+        {list.map((r) => <div className="tchip" key={r.st.id}><div><b>Roll {r.st.roll_no || '-'} · {r.st.name}</b><span className="sub">{tnames(r.tids)}{r.last ? ` · ${r.last.lesson} · ${r.last.correct}/${r.last.total_q}` : ''}</span></div>
+          {r.ts.length > 0 && <button className="btn view" onClick={() => setHist({ title: 'Test details', roll: r.st.roll_no, name: r.st.name, showTeacher: true, list: [], tests: r.ts })}>View</button>}</div>)}</div>); })}</div>
+      <div className="hint">A student is listed as Good or Bad by the latest test in the month. Students with no test in the month are listed as Test not taken. Data is kept for one month only (last month&apos;s data is deleted on the 4th), so download the CSV before then.</div>
     </div>}
 
     {tab === 'add' && isMgr && <div className="grid">
